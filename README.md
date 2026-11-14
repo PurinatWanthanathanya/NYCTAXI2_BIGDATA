@@ -1,254 +1,264 @@
 # NYC Taxi Big Data Pipeline (CS341 Submission 2)
 
-> **Course:** CS341 Big Data Engineering, Thammasat University  
-> **Student ID:** 6709650565  
-> **Baseline Submission:** [`notebooks/6709650565_Submission_1_cs341.ipynb`](file:///notebooks/6709650565_Submission_1_cs341.ipynb)  
-> **Pipeline Version:** `2.0.0`
+> **วิชา:** CS341 Big Data Engineering มหาวิทยาลัยธรรมศาสตร์  
+> **รหัสนักศึกษา:** 6709650565  
+> **งาน Submission 1 เดิม (Baseline):** [`notebooks/6709650565_Submission_1_cs341.ipynb`](notebooks/6709650565_Submission_1_cs341.ipynb)  
+> **เวอร์ชันของ Pipeline:** `2.0.0`
 
 ---
 
-## 1. Executive Summary & Core Answer
+## 1. บทสรุปและคำตอบ (Executive Summary & Core Answer)
 
-**Question:** *"Which taxi type was the most used in the first half of 2024 (2024-01 to 2024-06)?"*
+**คำถามหลักของโจทย์:** *"Which taxi type was the most used in the first half of 2024 (2024-01 ถึง 2024-06)?"*
 
-**Answer:** **High Volume For-Hire Vehicle (FHVHV - Uber/Lyft)** was overwhelmingly the most used taxi type in New York City during the first half of 2024.
+**คำตอบ:** **High Volume For-Hire Vehicle (FHVHV เช่น Uber และ Lyft)** เป็นประเภทแท็กซี่ที่มีปริมาณการใช้งานสูงที่สุดในมหานครนิวยอร์กตลอดครึ่งแรกของปี 2024 โดยมีจำนวนเที่ยววิ่งที่ผ่านการคลีนแล้วทั้งสิ้น **120,864,668 ทริป** คิดเป็นส่วนแบ่งการตลาดสูงถึง **80.76%**
 
-| Rank | Taxi Type | Cleaned Valid Trips (H1 2024) | Market Share (%) | Margin over Runner-up |
+| อันดับ | ประเภทแท็กซี่ | จำนวนทริป Valid (H1 2024) | ส่วนแบ่งการตลาด (%) | ส่วนต่างเทียบกับอันดับ 2 |
 |:---:|:---|:---:|:---:|:---:|
-| **1** | **FHVHV (High Volume FHV)** | **120,864,668** | **80.76%** | **+100,532,914 trips (5.94x Yellow)** |
-| 2 | Yellow Taxi | 20,331,754 | 13.59% | Runner-up |
+| **1** | **FHVHV (High Volume FHV)** | **120,864,668** | **80.76%** | **+100,532,914 ทริป (5.94 เท่าของ Yellow)** |
+| 2 | Yellow Taxi | 20,331,754 | 13.59% | รองชนะเลิศ |
 | 3 | FHV (Traditional FHV) | 8,119,228 | 5.43% | — |
 | 4 | Green Taxi | 339,801 | 0.23% | — |
-| **Total** | **All Taxi Types** | **149,655,451** | **100.00%** | **Reconciliation Diff: 0 (Exact match with S1)** |
+| **รวม** | **ทุกประเภทแท็กซี่** | **149,655,451** | **100.00%** | **Reconciliation Diff: 0 แถว (ตรงกับ S1 ครบทุกแถว)** |
 
 ![NYC Taxi Usage H1 2024](outputs/taxi_usage_h1_2024.png)
 
 ---
 
-## 2. Quick Start
+## 2. การเริ่มต้นใช้งานอย่างรวดเร็ว (Quick Start)
 
-This pipeline requires **Python 3.10+**. Dependencies are strictly pinned in [`requirements.txt`](file:///requirements.txt).
+Pipeline นี้พัฒนาบนสภาพแวดล้อม **Python 3.10+** โดยมีการระบุและล็อกเวอร์ชันของ Library อย่างเคร่งครัดในไฟล์ [`requirements.txt`](requirements.txt)
 
-### 2.1 Installation
+### 2.1 การติดตั้งสภาพแวดล้อม
 ```bash
-# Clone the repository
+# Clone repository
 git clone <repo-url>
 cd NYCTAXI2_BIGDATA
 
-# Install pinned dependencies
+# ติดตั้ง dependencies ที่ระบุเวอร์ชันตรงกัน
 python -m pip install -r requirements.txt
 ```
 
-### 2.2 Fast Verification (Smoke Test in ~2 seconds)
-To evaluate the pipeline end-to-end without downloading multi-gigabyte files, test with a single small batch (`green 2024-01`, ~1.3 MB):
+### 2.2 การทดสอบระบบเบื้องต้น (Smoke Test ภายใน ~2 วินาที)
+สามารถทดสอบการทำงานของ Pipeline แบบ End-to-End ได้ทันทีโดยไม่ต้องเสียเวลาดาวน์โหลดไฟล์ขนาดหลายกิกะไบต์ ด้วยการรันไฟล์ขนาดเล็ก `green 2024-01` (~1.3 MB):
 ```bash
-# Force process green 2024-01
+# บังคับประมวลผล Green 2024-01
 python run_pipeline.py --types green --months 2024-01 --mode force
 ```
 
-### 2.3 Idempotency Demonstration (Instant Skip)
-Run the exact same command with `--mode skip`. The pipeline verifies `_SUCCESS.json` and rules cryptographic hash, skipping execution in under **0.05 seconds**:
+### 2.3 การสาธิตคุณสมบัติ Idempotency (ข้ามการรันซ้ำทันที)
+เมื่อสั่งรันคำสั่งเดิมด้วยโหมด `--mode skip` ระบบจะตรวจสอบ `_SUCCESS.json` และค่า Hash ของกฎ หากตรงกันจะข้ามการคำนวณทั้งหมดภายในเวลาไม่ถึง **0.05 วินาที**:
 ```bash
-# Instant skip of already processed batch
+# ข้าม batch ที่เคยประมวลผลแล้วและกฎไม่เปลี่ยนแปลง
 python run_pipeline.py --types green --months 2024-01 --mode skip
 ```
 
-### 2.4 Full H1 2024 Pipeline Execution (24 Batches)
+### 2.4 การประมวลผลชุดข้อมูล H1 2024 ทั้งหมด (ครบ 24 Batches)
 ```bash
 python run_pipeline.py --months 2024-01 2024-02 2024-03 2024-04 2024-05 2024-06 --mode skip
 ```
 
-### 2.5 Incremental Update Demonstration (Yellow 2024-07)
-Demonstrates processing new data without re-processing historical batches or breaking H1 regression checks:
+### 2.5 การสาธิตการอัปเดตข้อมูลส่วนเพิ่ม (Incremental Update: Yellow 2024-07)
+สาธิตการนำเข้าข้อมูลเดือนใหม่ โดยระบบจะไม่ประมวลผลข้อมูลในอดีตซ้ำ และไม่กระทบต่อผลการทดสอบ Regression ของ H1:
 ```bash
 python run_pipeline.py --types yellow --months 2024-01 2024-02 2024-03 2024-04 2024-05 2024-06 2024-07 --mode skip
 ```
 
 ---
 
-## 3. Project Structure
+## 3. โครงสร้างของ Repository (Project Structure)
 
 ```text
 NYCTAXI2_BIGDATA/
-├── .gitignore                          # Excludes raw/trusted data and transient files
-├── requirements.txt                    # Pinned library versions (DuckDB, PyArrow, etc.)
-├── config.py                           # Central schema mapping, paths, and rules hash
-├── run_pipeline.py                     # Main CLI orchestrator
+├── README.md                           # เอกสารสถาปัตยกรรม ผลการวิเคราะห์ และหลักฐานการรัน
+├── .gitignore                          # ยกเว้นไฟล์ข้อมูล Raw, Trusted และไฟล์ชั่วคราว
+├── requirements.txt                    # กำหนดเวอร์ชัน dependencies: duckdb, pyarrow, pandas, matplotlib
+├── config.py                           # ศูนย์กลางการตั้งค่า Schema Map, Paths, Rules และ Rules Hash
+├── run_pipeline.py                     # CLI Orchestrator หลักสำหรับควบคุมการทำงาน
 ├── notebooks/
-│   └── 6709650565_Submission_1_cs341.ipynb  # Submission 1 baseline notebook
+│   └── 6709650565_Submission_1_cs341.ipynb  # โน้ตบุ๊กงาน Submission 1 เดิม (เก็บไว้เป็น Baseline)
 ├── src/
 │   ├── __init__.py
-│   ├── ingest.py                       # Atomic remote download & footer inspection
-│   ├── validate.py                     # Schema contracts & out-of-core DQ audit
-│   ├── transform.py                    # DuckDB streaming transform & atomic swap
-│   ├── curate.py                       # Monthly summary & stratified sample
-│   └── analyze.py                      # Ranking, regression check & sensitivity
+│   ├── ingest.py                       # ดาวน์โหลดแบบ Atomic Stream และอ่าน Metadata จาก Footer
+│   ├── validate.py                     # ตรวจสอบ Schema Contracts และคำนวณ Data Quality Audit
+│   ├── transform.py                    # สตรีม Transform ผ่าน DuckDB และทำ Atomic File Swap
+│   ├── curate.py                       # สรุปผลระดับ Curation (Monthly Summary) และสุ่มตัวอย่าง Stratified Sample
+│   └── analyze.py                      # ตอบคำถามธุรกิจ ตรวจสอบ Regression และทำ Sensitivity Analysis
 ├── data/
-│   ├── raw/                            # Ingested raw Parquet (gitignored)
-│   ├── trusted/                        # Transformed canonical Parquet (gitignored)
-│   ├── quarantine/                     # Rejected rows with reject_reason (tracked)
+│   ├── raw/                            # ข้อมูล Parquet ดิบจาก CloudFront (gitignored)
+│   ├── trusted/                        # ข้อมูล Parquet ที่ Clean และจัด Partition แล้ว (gitignored)
+│   ├── quarantine/                     # ข้อมูลที่ไม่ผ่านเกณฑ์ พร้อมระบุ reject_reason (.parquet, .csv)
 │   │   ├── taxi_type=green/...
 │   │   └── taxi_type=yellow/...
-│   ├── curated/                        # Curated monthly aggregate (tracked)
+│   ├── curated/                        # ข้อมูลสรุปรายเดือนสำหรับเสิร์ฟต่อ (tracked ใน git)
 │   │   ├── curated_monthly_summary.csv
 │   │   └── curated_monthly_summary.parquet
-│   └── sample/                         # Stratified sample (1,000 rows, tracked)
+│   └── sample/                         # ตัวอย่างข้อมูล 1,000 แถวแบบแบ่งชั้น (tracked ใน git)
 │       ├── curated_trips_sample.csv
 │       └── curated_trips_sample.parquet
 ├── logs/
-│   ├── pipeline_run_log.csv            # Run execution log (audit trail)
-│   ├── dq_report_by_batch.csv          # Per-batch data quality breakdown
-│   └── run_manifest_latest.json        # Latest run status & regression summary
+│   ├── pipeline_run_log.csv            # ประวัติการทำงานทุกครั้งและสถานะ Execution
+│   ├── dq_report_by_batch.csv          # รายงานการละเมิดกฎ Data Quality แยกตามราย batch
+│   └── run_manifest_latest.json        # สถานะภาพรวมและผลการตรวจสอบ Regression ล่าสุด
 └── outputs/
-    ├── final_answer_by_taxi_type.csv   # H1 2024 usage ranking table
-    ├── sensitivity_analysis.csv        # Sensitivity test permutations
-    └── taxi_usage_h1_2024.png          # High-resolution visualization chart
+    ├── final_answer_by_taxi_type.csv   # ตารางจัดอันดับการใช้งานแท็กซี่ H1 2024
+    ├── sensitivity_analysis.csv        # ผลการทดสอบความอ่อนไหวของกฎการคลีนข้อมูล
+    └── taxi_usage_h1_2024.png          # แผนภูมิแท่งและกราฟแนวโน้มความละเอียดสูง (300 DPI)
 ```
 
 ---
 
-## 4. Pipeline Architecture & Data Lineage
+## 4. สถาปัตยกรรมของ Pipeline และผังการไหลของข้อมูล (Architecture & Data Lineage)
 
-The pipeline is organized into modular stages adhering to modern Data Engineering principles (*Schema Contracts*, *Out-of-Core Processing*, *Atomic Staging*, and *Serving Views*):
+ระบบได้รับการออกแบบเป็น Modular Pipeline ตามหลักการ Data Engineering ชั้นนำ (*Schema Contracts*, *Out-of-Core Streaming*, *Atomic Staging*, และ *Serving Views*):
 
 ```mermaid
 flowchart TD
-    A["Raw NYC TLC CloudFront<br/>(Yellow, Green, FHV, FHVHV)"] -->|Atomic Stream Ingest| B["Landing Zone (data/raw)<br/>Footer metadata inspection"]
-    B -->|Schema Contract Check| C{"Validation Layer<br/>(src/validate.py)"}
-    C -->|Violations| D["Quarantine Zone (data/quarantine)<br/>Prioritized reject_reason (.parquet, .csv)"]
-    C -->|Valid Records| E["Trusted Zone (data/trusted)<br/>Canonical schema, ZSTD Parquet"]
-    E -->|Atomic Rename & Hash| F["_SUCCESS.json<br/>rules_hash fingerprint"]
+    A["แหล่งข้อมูล NYC TLC CloudFront<br/>(Yellow, Green, FHV, FHVHV)"] -->|Atomic Stream Ingest| B["Landing Zone (data/raw)<br/>ตรวจสอบ Metadata จาก Footer โดยไม่อ่านข้อมูลเข้า RAM"]
+    B -->|ตรวจ Schema Contract| C{"Validation Layer<br/>(src/validate.py)"}
+    C -->|ทริปที่ไม่ผ่านเกณฑ์| D["Quarantine Zone (data/quarantine)<br/>แยกตาม Priority พร้อม reject_reason (.parquet, .csv)"]
+    C -->|ทริปที่ผ่านเกณฑ์| E["Trusted Zone (data/trusted)<br/>Canonical Schema บีบอัด Zstandard Parquet"]
+    E -->|Atomic Rename & Hash| F["_SUCCESS.json<br/>บันทึก rules_hash กำกับความถูกต้อง"]
     E -->|Out-of-core Aggregation| G["Curated Zone (data/curated)<br/>curated_monthly_summary.parquet"]
-    G -->|Stratified Sampling| H["Sampling Zone (data/sample)<br/>curated_trips_sample.parquet (1,000 rows)"]
+    G -->|Stratified Sampling| H["Sampling Zone (data/sample)<br/>curated_trips_sample.parquet (1,000 แถว)"]
     G -->|Serving & Analytics| I["Outputs Layer (outputs/)<br/>final_answer.csv, chart.png, sensitivity.csv"]
 ```
 
-### Stage Details
-1. **Landing Zone (`data/raw/`):** Streamed download via `.tmp` chunking and atomic rename. Reads footer metadata (`pq.ParquetFile`) without reading data rows into RAM.
-2. **Validation Layer (`src/validate.py`):** Schema contract assertion against `config.SCHEMA_MAP` to handle heterogeneous field names (`tpep_*`, `lpep_*`, `dropOff_datetime`, `PUlocationID`).
-3. **Trusted Zone (`data/trusted/`):** Out-of-core DuckDB streaming `COPY` with Zstandard compression. Prunes ~20 raw columns down to 7 canonical analytical columns, achieving a **57.2% storage reduction** (from 3.24 GB raw to 1.39 GB trusted).
-4. **Quarantine Zone (`data/quarantine/`):** Non-conforming rows are isolated with their primary `reject_reason` and preserved in Parquet and CSV for root-cause analysis.
-5. **Curation & Serving Layer (`data/curated/`, `outputs/`):** Pre-aggregates monthly metrics and registers DuckDB views (`v_curated_monthly_summary`, `v_h1_2024_ranking`) for consumer tools.
+### รายละเอียดในแต่ละขั้น
+1. **Landing Zone (`data/raw/`):** สตรีมดาวน์โหลดลงไฟล์ชั่วคราว `.tmp` ก่อนเปลี่ยนชื่อแบบ Atomic (`os.replace`) และอ่านจำนวนแถวจาก Parquet Footer Metadata ผ่าน `pyarrow.parquet.ParquetFile` โดยไม่โหลดข้อมูลเข้า RAM
+2. **Validation Layer (`src/validate.py`):** ตรวจสอบ Schema Contract เทียบกับ `config.SCHEMA_MAP` เพื่อรองรับชื่อคอลัมน์ที่แตกต่างกันของแต่ละแท็กซี่ (`tpep_*`, `lpep_*`, `dropOff_datetime`, `PUlocationID`)
+3. **Trusted Zone (`data/trusted/`):** แปลงข้อมูลผ่าน DuckDB Streaming `COPY` บีบอัดด้วย Zstandard และตัดคอลัมน์ดิบที่ไม่จำเป็นออก เหลือเพียง 7 Canonical Analytical Columns ตามที่กำหนดใน `config.TRUSTED_COLUMNS` ได้แก่ `pickup_ts`, `dropoff_ts`, `pu_location_id`, `do_location_id`, `trip_duration_seconds`, `taxi_type`, และ `batch_month`
+   - **ชุดข้อมูล H1 2024 (24 ไฟล์):** ขนาดไฟล์ดิบ (Raw) `3,191.23 MB` ลดลงเหลือในชั้น Trusted เพียง **`1,357.44 MB`** (ประหยัดพื้นที่ลงถึง **57.46%**)
+   - **ชุดข้อมูลรวมเดือนกรกฎาคม 2024-07 (25 ไฟล์):** ขนาดไฟล์ดิบ `3,241.10 MB` ลดลงเหลือในชั้น Trusted เพียง **`1,388.11 MB`** (ประหยัดพื้นที่ลง **57.17%**)
+4. **Quarantine Zone (`data/quarantine/`):** บันทึกแถวที่ไม่ผ่านเกณฑ์การคลีนลงในโฟลเดอร์แยกต่างหาก พร้อมระบุคอลัมน์ `reject_reason` ในรูปแบบทั้ง Parquet และ CSV เพื่อให้ตรวจสอบสาเหตุย้อนหลังได้ทุกแถว
+5. **Curation & Serving Layer (`data/curated/`, `outputs/`):** สรุปผลระดับ Aggregate รายเดือน และประมวลผลผ่านตารางสรุปใน DuckDB (`monthly_summary`) สำหรับนำไปคำนวณอันดับและสร้างชาร์ต
 
 ---
 
-## 5. Execution & Idempotency Evidence
+## 5. หลักฐานการประมวลผลและความเป็น Idempotent (Execution & Idempotency Evidence)
 
-All runs are recorded in [`logs/pipeline_run_log.csv`](file:///logs/pipeline_run_log.csv) and [`logs/run_manifest_latest.json`](file:///logs/run_manifest_latest.json).
+บันทึกประวัติการรันจริงทั้งหมดถูกเก็บไว้ใน [`logs/pipeline_run_log.csv`](logs/pipeline_run_log.csv) และ [`logs/run_manifest_latest.json`](logs/run_manifest_latest.json)
 
-### Run 1: Initial Full H1 Run (24 Batches)
-- **Run ID:** `ae02785e` | **Mode:** `FORCE`
-- **Total Wall Time:** `1,125.15s` (~18.7 minutes)
-- **Raw Rows Ingested:** `149,655,796`
-- **Cleaned Valid Rows:** `149,655,451`
-- **Quarantined Invalid Rows:** `345`
-- **H1 Regression Check:** `PASSED` (Diff = 0)
+### Run 1: การประมวลผลเต็มรูปแบบ H1 2024 (24 Batches)
+- **Run ID:** `ae02785e` | **โหมด:** `FORCE`
+- **เวลาทำงานรวม (Wall Time):** `1,125.15 วินาที` (~18.7 นาที) *(ประกอบด้วยเวลาประมวลผล 24 batches รวม 839.47 วินาทีตามที่บันทึกใน `logs/pipeline_run_log.csv` และขั้นตอน Curation ร่วมกับ Sensitivity Analysis หลังรันเสร็จอีก ~285.68 วินาที)*
+- **จำนวนแถว Raw ที่รับเข้า:** `149,655,796` แถว
+- **จำนวนแถว Cleaned Valid:** `149,655,451` แถว
+- **จำนวนแถว Quarantine:** `345` แถว
+- **ผลการทดสอบ H1 Regression Check:** `PASSED` (Diff = 0 แถว)
 
-### Run 2: Idempotent Rerun (24 Batches Skipped)
-- **Run ID:** `6fe1ebe9` | **Mode:** `SKIP`
-- **Batch Evaluation Time:** `< 0.05 seconds` per batch (all 24 batches skipped under `SKIPPED_ALREADY_PROCESSED`).
-- **Rows Reprocessed:** `0`
-- **Integrity Guarantee:** Verified both `_SUCCESS.json` presence and matching `rules_hash`.
+### Run 2: การสาธิตการรันซ้ำแบบ Idempotent (ข้ามทั้ง 24 Batches)
+- **Run ID:** `6fe1ebe9` | **โหมด:** `SKIP`
+- **เวลาในการตรวจสอบต่อ batch:** `< 0.05 วินาที` (บันทึก `0.0s` ใน `logs/pipeline_run_log.csv`, ข้ามครบทั้ง 24 batches โดยบันทึกสถานะ `SKIPPED_ALREADY_PROCESSED`)
+- **จำนวนแถวที่ต้องประมวลผลซ้ำ:** `0` แถว
+- **การรับประกันความถูกต้อง:** ตรวจสอบทั้งการมีอยู่ของ `_SUCCESS.json` และความตรงกันของ `rules_hash`
 
-### Run 3: Incremental Update (Yellow 2024-07)
-- **Run ID:** `7c3f23e2` | **Mode:** `SKIP`
-- **Batches Skipped:** `6` (`yellow 2024-01` through `yellow 2024-06`)
-- **Batches Processed:** `1` (`yellow 2024-07`)
-  - Raw Rows: `3,076,903` | Valid Rows: `3,076,851` | Quarantined Rows: `52`
-  - Processing Time: `18.06s`
-- **H1 Regression Stability:** `PASSED` (Total Valid H1 = `149,655,451`). The addition of July data updated `curated_monthly_summary.csv` to 25 rows without corrupting the historical H1 baseline.
+### Run 3: การประมวลผลข้อมูลส่วนเพิ่ม (Incremental Update: Yellow 2024-07)
+*(หมายเหตุ: การรัน Yellow 2024-07 เป็นการสาธิตความสามารถในการอัปเดตข้อมูลส่วนเพิ่มเฉพาะประเภท Yellow Taxi เท่านั้น ไม่ใช่การจัดอันดับเปรียบเทียบข้ามประเภทของเดือนกรกฎาคม)*
+- **Run ID:** `7c3f23e2` | **โหมด:** `SKIP`
+- **Batches ที่ข้ามอัตโนมัติ:** `6` batches (`yellow 2024-01` ถึง `yellow 2024-06`)
+- **Batch ที่ประมวลผลใหม่:** `1` batch (`yellow 2024-07`)
+  - แถว Raw: `3,076,903` | แถว Valid: `3,076,851` | แถว Quarantine: `52`
+  - เวลาในการประมวลผล batch นี้: `18.06 วินาที`
+- **ความเสถียรของผลลัพธ์ H1:** `PASSED` (ยอดรวม Valid H1 ยังคงเท่ากับ `149,655,451` ทริปอย่างถูกต้อง) ข้อมูลเดือนใหม่ถูกผนวกเข้าสู่ `curated_monthly_summary.csv` เป็น 25 แถว โดยไม่รบกวนข้อมูลสรุปของ H1 เดิม
 
 ---
 
-## 6. Key Design Decisions
+## 6. การตัดสินใจเชิงออกแบบที่สำคัญ (Key Design Decisions)
 
-### Decision 1: Batch Identity (`batch_month`) vs Trip Timestamp (`pickup_ts`)
-- **Problem:** Monthly Parquet files from NYC TLC contain cross-month boundary trips (e.g., trips starting in late December in a January file, or June trips in a July file). In Submission 1, counts were aggregated strictly by batch files.
-- **Decision:** Separate `batch_month` (string `'YYYY-MM'` from file partition) from `pickup_ts` (timestamp). Batch identity and H1 regression checks filter strictly on `batch_month BETWEEN '2024-01' AND '2024-06'`.
-- **Trade-off:** Prevents out-of-month trips from shifting across batches, guaranteeing exact mathematical reconciliation with baseline counts while preserving full timestamp granularity for downstream analytics.
+### การตัดสินใจที่ 1: แยกเดือนของไฟล์ (`batch_month`) ออกจากเวลาทริปจริง (`pickup_ts`)
+- **ปัญหาที่พบ:** ไฟล์ Parquet รายเดือนของ NYC TLC มักมีข้อมูลทริปที่ข้ามรอยต่อเดือนหลงเข้ามา (เช่น ทริปปลายเดือนธันวาคมในไฟล์เดือนมกราคม หรือทริปเดือนมิถุนายนในไฟล์เดือนกรกฎาคม) ใน Submission 1 นักศึกษานับข้อมูลยึดตามไฟล์ batch เป็นหลัก
+- **การออกแบบ:** กำหนด `batch_month` (string เช่น `'2024-01'`) ตามไฟล์ที่นำเข้าสำหรับใช้ในการแบ่ง Partition และการทดสอบ Regression ขณะเดียวกันก็เก็บ `pickup_ts` ไว้วิเคราะห์เวลาทริปอย่างละเอียด
+- **ผลลัพธ์:** ป้องกันไม่ให้ทริปหลงเดือนข้ามย้าย batch ซึ่งจะทำให้ตัวเลขไม่ตรงกับ Baseline และทำให้สามารถกระทบยอดกับ Submission 1 ได้แม่นยำ 100%
 
-### Decision 2: Atomic Writes & Cryptographic Rules Fingerprinting (`rules_hash`)
-- **Problem:** Network interruptions or script terminations leave corrupted `.parquet` files. Furthermore, a naive skip mode would serve obsolete outputs if data cleaning rules were modified.
-- **Decision:** Every output file is written to `.tmp` first, row counts are verified against raw footers (`raw == valid + invalid`), and only then atomically renamed via `os.replace()`. Each `_SUCCESS.json` includes a SHA-256 fingerprint (`rules_hash`) computed over `PIPELINE_VERSION`, schema maps, column definitions, and cleaning boundaries.
-- **Trade-off:** Eliminates partial-write corruption and guarantees automated reprocessing whenever cleaning rules are modified.
+### การตัดสินใจที่ 2: การเขียนไฟล์แบบ Atomic และการทำ Rules Fingerprint (`rules_hash`)
+- **ปัญหาที่พบ:** หากกระบวนการทำงานสะดุดระหว่างเขียนไฟล์ อาจเกิดไฟล์ Parquet เสียหายค้างอยู่ในระบบ นอกจากนี้ โหมด Skip แบบทั่วไปอาจเสิร์ฟผลลัพธ์เก่าหากผู้ใช้มีการแก้ไขกฎการคลีนข้อมูล
+- **การออกแบบ:** เขียนไฟล์ชั่วคราวลงใน `.tmp` เสมอ เมื่อตรวจสอบยอดแถวสมบูรณ์แล้วจึงสลับชื่อไฟล์ด้วย `os.replace()` พร้อมทั้งสร้างไฟล์ `_SUCCESS.json` ที่บันทึกค่า SHA-256 (`rules_hash`) ซึ่งคำนวณจากเวอร์ชันของ Pipeline, Schema Mapping, รายชื่อคอลัมน์ และขอบเขตวันที่
+- **ผลลัพธ์:** ขจัดปัญหาไฟล์เขียนไม่เสร็จค้างในระบบ และหากมีการแก้ไขกฎในโค้ด ระบบจะตรวจพบว่า Hash ไม่ตรงกันและทำการประมวลผลใหม่ให้อัตโนมัติ
 
-### Decision 3: Mutually Exclusive Quarantine vs Overlapping DQ Auditing
-- **Problem:** A single bad row may violate multiple rules simultaneously (e.g., `pickup IS NULL` and `dropoff < pickup`). Summing individual rule violations produces double-counting, breaking the conservation law: $\text{Raw} = \text{Valid} + \text{Invalid}$.
-- **Decision:** We implement a strict priority hierarchy for quarantine categorization:
+### การตัดสินใจที่ 3: การจัดลำดับความสำคัญใน Quarantine และการนับ Overlapping DQ
+- **ปัญหาที่พบ:** ข้อมูลที่ไม่สมบูรณ์หนึ่งแถวอาจละเมิดกฎหลายข้อพร้อมกัน (เช่น ทั้งเวลา pickup เป็นค่าว่าง และเวลา dropoff น้อยกว่าเวลา pickup) หากนับแยกรายกฎแล้วนำมาบวกกัน ยอดรวมจะไม่เท่ากับจำนวนแถว invalid จริง ทำให้สมการ $\text{Raw} = \text{Valid} + \text{Invalid}$ ไม่ลงตัว
+- **การออกแบบ:** กำหนดลำดับความสำคัญของกฎแบบ Mutually Exclusive สำหรับระบุ `reject_reason` เพียงค่าเดียวใน Quarantine:
   $$\text{null\_pickup} \longrightarrow \text{null\_dropoff} \longrightarrow \text{dropoff\_before\_pickup} \longrightarrow \text{pickup\_out\_of\_period}$$
-  Simultaneously, overlapping violation counts are tracked independently in `logs/dq_report_by_batch.csv` for data quality profiling.
-- **Trade-off:** Enables strict accounting reconciliation while retaining complete diagnostic visibility.
+  ขณะเดียวกัน ระบบก็นับจำนวนการละเมิดกฎแต่ละข้อแบบซ้อนทับ (Overlapping) แยกไว้ใน `logs/dq_report_by_batch.csv` เพื่อใช้วิเคราะห์คุณภาพข้อมูล
+- **ผลลัพธ์:** ทำให้สามารถกระทบยอดบัญชีข้อมูลได้อย่างสมบูรณ์ และยังคงเห็นข้อมูลเชิงลึกของการละเมิดกฎทุกข้อครบถ้วน
 
-### Decision 4: Out-of-Core Processing Ceiling with DuckDB & PyArrow
-- **Problem:** Monthly FHVHV files exceed 2.7 GB uncompressed (~21 million rows per month). Loading them into Pandas DataFrames causes Out-Of-Memory (OOM) crashes on standard developer workstations.
-- **Decision:** DuckDB's streaming columnar engine processes raw Parquet files chunk-by-chunk directly into compressed Parquet on disk without loading full tables into memory. Peak RAM consumption remained under **1.2 GB** across all 150 million records.
-- **Trade-off:** High memory safety and sub-20-minute execution time on a single local laptop without requiring complex cluster setup (e.g., Apache Spark).
+### การตัดสินใจที่ 4: สถาปัตยกรรม Out-of-Core และพฤติกรรมการใช้หน่วยความจำ
+- **บริบทเดิม:** ใน Submission 1 มีการใช้ DuckDB คิวรีข้อมูลดิบแบบ Interactive ภายใน Session ของ Jupyter Notebook โดยไม่ได้บันทึกชั้นข้อมูล Trusted ที่แบ่ง Partition ลงดิสก์อย่างถาวร สำหรับ Submission 2 โจทย์ต้องการให้สร้าง Data Pipeline เต็มรูปแบบที่เขียนข้อมูล Trusted 150 ล้านแถวลงดิสก์อย่างมีประสิทธิภาพ
+- **การออกแบบ:** ใช้ DuckDB Streaming Engine อ่านและแปลงข้อมูลเป็นชุดย่อย (Chunks) ส่งตรงไปยังไฟล์ Parquet บีบอัดบนดิสก์โดยตรง
+- **พฤติกรรมการใช้หน่วยความจำจริง:**
+  - ค่าจำกัดหน่วยความจำโดยปริยาย (DuckDB Default Limit): ตั้งไว้ที่ 12.5 GiB (คิดเป็น 80% ของ RAM 16 GB ของเครื่อง)
+  - ระหว่างการคิวรีอ่านข้อมูลเพื่อคำนวณสถิติและทำ Curation: วัดค่า Working Set ของ Process ได้ไม่เกิน **205 MB**
+  - ระหว่างการเขียนไฟล์แปลงข้อมูล Parquet ก้อนที่ใหญ่ที่สุด (`fhvhv 2024-03`, จำนวน 21.28 ล้านแถว): วัดค่า Peak Working Set ได้ **3,070.38 MB** (~3.07 GB วัดผ่าน Win32 API `GetProcessMemoryInfo`) ซึ่งทำงานอยู่ภายในขอบเขตของ Physical RAM ได้อย่างปลอดภัยโดยไม่มีการสลับข้อมูลลง Pagefile และไม่มีปัญหา Memory Leak
 
 ---
 
-## 7. Data Quality Audit & Baseline Reconciliation
+## 7. การตรวจสอบคุณภาพข้อมูลและการกระทบยอดกับ Submission 1 (Data Quality & Reconciliation)
 
-### 7.1 Reconciliation with Submission 1 Baseline
-The pipeline achieves a **0-row difference** against the Submission 1 baseline across all taxi types:
+### 7.1 การกระทบยอดเชิงตัวเลขกับ Submission 1 Baseline
+ผลการรันจริงของ Pipeline ได้ตัวเลขตรงกับงาน Submission 1 เดิมทุกประเภทแท็กซี่ โดยมีผลต่างเท่ากับ 0:
 
-| Taxi Type | Raw Ingested Rows | Submission 1 Valid | Pipeline Valid | Quarantined Rows | Difference | Status |
+| ประเภทแท็กซี่ | แถว Raw นำเข้า | Submission 1 Valid | Pipeline Valid | แถว Quarantine | ผลต่าง (Diff) | สถานะ |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Yellow** | 20,332,093 | 20,331,754 | **20,331,754** | 339 | 0 | **EXACT MATCH** |
-| **Green** | 339,807 | 339,801 | **339,801** | 6 | 0 | **EXACT MATCH** |
-| **FHV** | 8,119,228 | 8,119,228 | **8,119,228** | 0 | 0 | **EXACT MATCH** |
-| **FHVHV** | 120,864,668 | 120,864,668 | **120,864,668** | 0 | 0 | **EXACT MATCH** |
-| **Total** | **149,655,796** | **149,655,451** | **149,655,451** | **345** | **0** | **100% RECONCILED** |
+| **Yellow** | 20,332,093 | 20,331,754 | **20,331,754** | 339 | 0 | **ตรงกันสมบูรณ์** |
+| **Green** | 339,807 | 339,801 | **339,801** | 6 | 0 | **ตรงกันสมบูรณ์** |
+| **FHV** | 8,119,228 | 8,119,228 | **8,119,228** | 0 | 0 | **ตรงกันสมบูรณ์** |
+| **FHVHV** | 120,864,668 | 120,864,668 | **120,864,668** | 0 | 0 | **ตรงกันสมบูรณ์** |
+| **รวมทั้งสิ้น** | **149,655,796** | **149,655,451** | **149,655,451** | **345** | **0** | **Reconciliation 100%** |
 
-### 7.2 Detailed Breakdown of Quarantined Rows (H1 2024)
-Across the 149.65 million records, exactly **345 trips** were rejected:
-- **`dropoff_before_pickup` (300 trips):** All from Yellow Taxi (e.g., Yellow March had 117 trips where dropoff occurred before pickup).
-- **`pickup_out_of_period` (45 trips):** 39 trips in Yellow and 6 trips in Green (trips with timestamps belonging to prior years, such as 2023-12-31).
-- **`null_pickup` / `null_dropoff` (0 trips):** No null timestamps were present in the 2024 H1 TLC dataset.
+### 7.2 จำแนกรายละเอียดของข้อมูลที่ถูกส่งเข้า Quarantine (H1 2024)
+จากข้อมูลทั้งสิ้น 149.65 ล้านแถวในครึ่งปีแรก มีข้อมูลไม่ผ่านเกณฑ์ถูกคัดแยกเข้า Quarantine รวม **345 แถว** (Yellow: 339 แถว, Green: 6 แถว, FHV: 0 แถว, FHVHV: 0 แถว) โดยมีสาเหตุดังนี้:
+- **`dropoff_before_pickup` (300 แถว):** ทั้งหมด 300 แถวมาจาก Yellow Taxi (เช่น เดือนมีนาคมมี 117 แถวที่เวลาส่งผู้โดยสารเกิดขึ้นก่อนเวลารับ)
+- **`pickup_out_of_period` (45 แถว):** มาจาก Yellow 39 แถว และ Green 6 แถว เมื่อเจาะดูข้อมูลเวลาทริปจริงพบการกระจายตัวของปีดังนี้:
+  - **ความผิดปกติของนาฬิกา/อุปกรณ์ในอดีต:** ปี 2002 (Yellow 10 แถว), ปี 2008 (Yellow 5 แถว, Green 2 แถว), ปี 2009 (Yellow 9 แถว, Green 2 แถว), ปี 2023 (Yellow 10 แถว, Green 2 แถว)
+  - **ความผิดปกติข้ามช่วงรอยต่อและเวลาในอนาคต:** ปี 2024 (Yellow 3 แถวที่เวลาหลุดขอบเขตช่วง), ปี 2026 (Yellow 2 แถวที่มีเวลาหลุดไปในอนาคต เช่น `2026-06-26 23:53:12`)
+- **`null_pickup` / `null_dropoff` (0 แถว):** ไม่พบค่าว่างในคอลัมน์ Timestamp ของข้อมูลปี 2024 H1
 
-### 7.3 Data Quality Finding: High Rate of Null Locations in FHV
-Auditing location fields revealed that **~78% of all FHV pickups** have `NULL` for `PUlocationID` (ranging between 963,825 and 1,191,229 null rows per month). 
-- In accordance with the *Missing ≠ Invalid* principle from Module 01, `pu_location_id` and `do_location_id` are treated as nullable columns rather than discarding records, preserving over 8.1 million valid FHV trips.
+### 7.3 ข้อค้นพบด้านคุณภาพข้อมูล: อัตราค่าว่างของ Location ID ใน FHV
+จากการตรวจสอบคอลัมน์สถานที่พบว่า **~78% ของข้อมูล FHV** มีค่าว่าง (`NULL`) ในคอลัมน์ `PUlocationID` (คิดเป็น 963,825 ถึง 1,191,229 แถวต่อเดือน)  
+- ตามหลักการ *Missing ≠ Invalid* จากเอกสารการสอน จึงกำหนดให้คอลัมน์ `pu_location_id` และ `do_location_id` เป็น Nullable แทนที่จะคัดข้อมูลทิ้ง ทำให้สามารถรักษาข้อมูลทริปที่ถูกต้องของ FHV ไว้ได้กว่า 8.11 ล้านแถว
 
 ---
 
-## 8. Sensitivity Analysis (Outlier ≠ Error)
+## 8. การวิเคราะห์ความอ่อนไหว (Sensitivity Analysis: Outlier ≠ Error)
 
-To test the robustness of the business answer, we conducted a sensitivity analysis on optional cleaning rules ([`outputs/sensitivity_analysis.csv`](file:///outputs/sensitivity_analysis.csv)):
+เพื่อทดสอบความหนักแน่นของข้อสรุปธุรกิจ ได้ทำการทดสอบ Sensitivity Analysis กับกฎการกรองข้อมูลทางเลือกเพิ่มเติม ([`outputs/sensitivity_analysis.csv`](outputs/sensitivity_analysis.csv)):
 
-| Scenario | FHVHV Trips | Yellow Trips | Winner | Margin over Runner-up | Winner Changed? |
+| สถานการณ์จำลอง | จำนวนทริป FHVHV | จำนวนทริป Yellow | ผู้ชนะ | ส่วนต่างนำอันดับ 2 | ผู้ชนะเปลี่ยนหรือไม่? |
 |:---|:---:|:---:|:---:|:---:|:---:|
-| **1. Baseline (Current Rules)** | **120,864,668** | 20,331,754 | **FHVHV** | **+100,532,914** | **No** |
-| 2. Exclude 0-second duration | 120,864,656 | 20,325,877 | **FHVHV** | +100,538,779 | **No** |
-| 3. Exclude >24-hour duration | 120,864,668 | 20,331,645 | **FHVHV** | +100,533,023 | **No** |
-| 4. Exclude duplicate non-null trips | 120,864,373 | 20,105,621 | **FHVHV** | +100,758,752 | **No** |
+| **1. กฎมาตรฐาน (Baseline)** | **120,864,668** | 20,331,754 | **FHVHV** | **+100,532,914** | **ไม่เปลี่ยน** |
+| 2. ตัดทริปที่มีระยะเวลา 0 วินาทีออก | 120,864,656 | 20,325,877 | **FHVHV** | +100,538,779 | **ไม่เปลี่ยน** |
+| 3. ตัดทริปที่มีระยะเวลาเกิน 24 ชั่วโมงออก | 120,864,668 | 20,331,645 | **FHVHV** | +100,533,023 | **ไม่เปลี่ยน** |
+| 4. ตัดทริปที่ซ้ำกัน (พิจารณาเฉพาะแถวที่ Location ไม่ว่าง) | 120,864,373 | 20,105,621 | **FHVHV** | +100,758,752 | **ไม่เปลี่ยน** |
 
-**Conclusion:** The finding that **FHVHV was the most used taxi type** is completely invariant to cleaning choices, with an insurmountable margin of over **100.5 million trips** (5.94x) over Yellow Taxi.
+*(หมายเหตุ: ในสถานการณ์จำลองที่ 4 เป็นการทดสอบตัดทริปซ้ำบนแถวที่มี Location ครบถ้วน (`pu_location_id IS NOT NULL AND do_location_id IS NOT NULL`) เพื่อป้องกันผลกระทบจากข้อจำกัดของข้อมูล FHV ดั้งเดิมที่มีค่าว่าง Location ถึง 78.33% ซึ่งทำให้ในกรณี FHV มีทริปซ้ำลดลงไปเพียง 1,558 แถว)*
+
+**สรุปผล:** ข้อสรุปที่ว่า **FHVHV เป็นแท็กซี่ที่มีการใช้งานมากที่สุด** มีความหนักแน่นและไม่แปรเปลี่ยนตามทางเลือกการคลีนข้อมูลใดๆ โดยมีทริปนำอันดับสองอยู่มากกว่า **100.5 ล้านทริป** (5.94 เท่าของ Yellow Taxi) ในทุกสถานการณ์จำลอง
 
 ---
 
-## 9. Baseline vs Production Pipeline Comparison
+## 9. ตารางเปรียบเทียบ Submission 1 กับ Submission 2
 
-| Dimension | Submission 1 (Baseline Notebook) | Submission 2 (Production Pipeline) |
+| มิติการประเมิน | Submission 1 (Baseline Notebook) | Submission 2 (Production Pipeline) |
 |:---|:---|:---|
-| **Execution Model** | Monolithic Jupyter Notebook cells | Modular Python CLI pipeline (`src/`, `config.py`) |
-| **Memory Footprint** | In-memory Pandas loads (high OOM risk) | Out-of-core DuckDB streaming (RAM capped < 1.2 GB) |
-| **Reproducibility** | Manual execution, dependent on kernel state | One-command execution with pinned `requirements.txt` |
-| **Idempotency** | Re-runs everything from scratch | `_SUCCESS.json` + `rules_hash` skips processed batches |
-| **Incremental Updates** | Not supported (requires full re-run) | Automated batch appending (e.g., Yellow 2024-07 in 18s) |
-| **Data Quality & Quarantine** | Silent row dropping via boolean filters | Priority quarantine zone with auditable `.csv` and `.parquet` |
-| **Data Lineage** | Overwrites in memory | Clear zones: Raw $\rightarrow$ Trusted $\rightarrow$ Curated $\rightarrow$ Serving |
-| **Verification** | Visual inspection of DataFrame outputs | Automated H1 regression check against baseline |
+| **รูปแบบการประมวลผล (Architecture)** | โน้ตบุ๊กเดี่ยว (Monolithic Jupyter Notebook) | แยกโมดูลตามหน้าที่ชัดเจน (`src/`, `config.py`, CLI) |
+| **การจัดเก็บข้อมูลและ Data Lineage** | คิวรีชั่วคราวในหน่วยความจำ ไม่มีชั้น Trusted บนดิสก์ | จัดเก็บชั้น Trusted แบ่ง Partition ชัดเจน บีบอัด Zstandard |
+| **ความสามารถในการทำซ้ำ (Reproducibility)** | รันแบบ Interactive ผ่าน Cell ในโน้ตบุ๊ก | รันคำสั่งเดียวผ่าน CLI พร้อมไฟล์ `requirements.txt` ที่ล็อกเวอร์ชัน |
+| **การรันซ้ำอย่างปลอดภัย (Idempotency)** | สั่งรันใหม่จะต้องคิวรีและประมวลผลใหม่ทั้งหมด | ตรวจสอบ `_SUCCESS.json` และ `rules_hash` ข้ามการทำงานซ้ำใน 0.05 วิ |
+| **การอัปเดตข้อมูลส่วนเพิ่ม (Incremental)** | ไม่รองรับ ต้องเริ่มรันใหม่ทั้งหมด | เพิ่มเฉพาะ batch ใหม่ (เช่น Yellow 2024-07 ใน 18 วิ) โดยไม่รันข้อมูลเก่าซ้ำ |
+| **การจัดการคุณภาพข้อมูล (Data Quality)** | กรองข้อมูลทิ้งแบบเงียบๆ ไม่ทราบสาเหตุ | คัดแยกเข้า Quarantine Zone พร้อมระบุ `reject_reason` ทุกแถว |
+| **การทดสอบความถูกต้อง (Testing)** | ตรวจสอบด้วยสายตาจากตารางในโน้ตบุ๊ก | มีระบบ Automated H1 Regression Check ตรวจสอบยอดเทียบ Baseline อัตโนมัติ |
 
 ---
 
-## 10. Honest Pipeline Limitations
+## 10. ข้อจำกัดของระบบ (Pipeline Limitations)
 
-1. **Single-Node Execution:** The pipeline runs on a single node using DuckDB and PyArrow. While it processes 150 million rows efficiently on a standard laptop in ~18 minutes, horizontal scaling across multiple distributed nodes would require an engine like Apache Spark or Trino.
-2. **Batch-Oriented:** The pipeline operates on monthly batch files. Near-real-time streaming ingestion (e.g., Apache Kafka / Flink) is outside the design scope.
-3. **External Upstream Dependency:** Ingestion directly downloads from the public NYC TLC CloudFront distribution. Network latency or schema changes upstream require updating `SCHEMA_MAP`.
+1. **การทำงานบนเครื่องเดี่ยว (Single-Node Execution):** ระบบได้รับการออกแบบให้ทำงานบนเครื่องคอมพิวเตอร์เครื่องเดียวได้อย่างมีประสิทธิภาพสูงผ่าน DuckDB และ PyArrow (~18 นาทีสำหรับ 150 ล้านแถว) หากต้องการขยายสเกลเพื่อรองรับข้อมูลที่ใหญ่ขึ้นในระดับคลัสเตอร์หลายเครื่อง จะต้องเปลี่ยนไปใช้ Distributed Engine เช่น Apache Spark หรือ Trino
+2. **การประมวลผลแบบ Batch (Batch-Oriented):** ระบบทำงานกับข้อมูลทริปแบบไฟล์ Parquet รายเดือน ไม่ได้รองรับการสตรีมข้อมูลแบบ Real-time (เช่น Apache Kafka หรือ Apache Flink)
+3. **การพึ่งพาแหล่งข้อมูลภายนอก (External Upstream Dependency):** ขั้นตอน Ingestion ดาวน์โหลดไฟล์โดยตรงจาก CloudFront ของ NYC TLC หากฝั่งต้นทางมีการเปลี่ยนโครงสร้าง URL หรือเปลี่ยน Schema คอลัมน์ จะต้องเข้ามาปรับค่าใน `SCHEMA_MAP`
 
 ---
 
-## 11. Learning Reflection
+## 11. บทเรียนและการสะท้อนการเรียนรู้ (Learning Reflection)
 
-During Submission 1, I approached data processing from an exploratory perspective, loading datasets into a single notebook and dropping invalid rows silently. Building Submission 2 showed me that production Data Engineering is fundamentally about contracts, fault tolerance, and reproducibility. By introducing out-of-core DuckDB streaming and atomic writes, I was able to process 149.65 million rows with peak memory under 1.2 GB while achieving exact mathematical reconciliation. Most importantly, separating the quarantine zone and implementing cryptographic rules hashing proved that data pipelines must not only compute correct numbers, but also provide transparent proof of how every single row was handled.
+ใน Submission 1 การทำงานเป็นการวิเคราะห์ข้อมูลเชิงสำรวจใน Jupyter Notebook ซึ่งสามารถตอบคำถามธุรกิจได้แต่ยังขาดการจัดเก็บข้อมูลเป็นชั้นๆ การตรวจสอบย้อนกลับ และระบบทดสอบความถูกต้องอัตโนมัติ การพัฒนา Submission 2 ทำให้ผมเข้าใจว่าวิศวกรรมข้อมูลระดับใช้งานจริง (Production Data Engineering) จำเป็นต้องมี Schema Contracts, การเขียนไฟล์แบบ Atomic และการทำ Rules Hashing เพื่อความถูกต้องและโปร่งใส การใช้ DuckDB ประมวลผลข้อมูล 149.65 ล้านแถวช่วยลดพื้นที่จัดเก็บจาก 3,191.23 MB เหลือ 1,357.44 MB และกระทบยอดกับ Submission 1 ได้แม่นยำ 100% ที่สำคัญที่สุดคือ การแยก Quarantine Zone ออกมาทำให้เราสามารถอธิบายการตัดสินใจด้านคุณภาพข้อมูลทุกแถวได้อย่างโปร่งใสและมีหลักฐานชัดเจน

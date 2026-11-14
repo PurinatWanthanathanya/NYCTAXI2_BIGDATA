@@ -57,13 +57,13 @@ def generate_curated_outputs() -> dict:
         f"COPY monthly_summary TO '{str(curated_summary_csv).replace('\\', '/')}' (HEADER, DELIMITER ',');"
     )
 
-    # 2. Stratified Sampling (up to 250 rows per taxi_type, totaling ~1,000 rows)
+    # 2. Stratified Sampling (40 rows per taxi_type and batch_month partition, totaling 1,000 rows)
     sample_sql = f"""
     CREATE OR REPLACE TABLE stratified_sample AS
     WITH ranked AS (
         SELECT
             *,
-            ROW_NUMBER() OVER (PARTITION BY taxi_type ORDER BY pickup_ts) AS rnk
+            ROW_NUMBER() OVER (PARTITION BY taxi_type, batch_month ORDER BY pickup_ts) AS rnk
         FROM read_parquet('{trusted_pattern}')
     )
     SELECT
@@ -75,8 +75,8 @@ def generate_curated_outputs() -> dict:
         taxi_type,
         batch_month
     FROM ranked
-    WHERE rnk <= 250
-    ORDER BY taxi_type, pickup_ts;
+    WHERE rnk <= 40
+    ORDER BY taxi_type, batch_month, pickup_ts;
     """
     con.execute(sample_sql)
 
