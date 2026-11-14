@@ -1,5 +1,5 @@
 """
-scripts/deploy_athena.py - Deploy curated outputs to AWS S3 & Athena (ส่วนเสริม B).
+scripts/deploy_athena.py - Deploy curated outputs to AWS S3 & Athena.
 CS341 Big Data Engineering - Submission 2
 """
 import argparse
@@ -35,7 +35,7 @@ def check_aws_credentials() -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Deploy Curated NYC Taxi Outputs to AWS S3 and Amazon Athena (ส่วนเสริม B)"
+        description="Deploy Curated NYC Taxi Outputs to AWS S3 and Amazon Athena"
     )
     parser.add_argument(
         "--bucket",

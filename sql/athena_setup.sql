@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- CS341 Big Data Engineering - Submission 2
--- ส่วนเสริม B: Serving View บน Cloud (AWS S3 + Glue Catalog + Amazon Athena)
+-- Serving View บน Cloud (AWS S3 + Glue Catalog + Amazon Athena)
 -- ==============================================================================
 -- สคริปต์นี้สร้าง Database, External Table, และ Serving Views บน Amazon Athena
 -- สำหรับเชื่อมต่อกับไฟล์ Curated Parquet บน S3 (อิงตามแนวคิด Views as a Serving Layer - Module 02)

@@ -25,6 +25,7 @@ from config import (
 )
 from src.analyze import (
     answer_business_question,
+    generate_pipeline_diagram,
     generate_visualizations,
     run_sensitivity_analysis,
     verify_h1_regression
@@ -241,6 +242,8 @@ def main():
     # 6. Visualizations
     chart_path = generate_visualizations()
     print(f"[✓] Visualization chart saved to: {chart_path}")
+    diagram_path = generate_pipeline_diagram()
+    print(f"[✓] Pipeline diagram saved to: {diagram_path}")
 
     # 7. Sensitivity Analysis
     if not args.skip_sensitivity:
