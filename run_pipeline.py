@@ -111,6 +111,8 @@ def main():
 
             current_rules_hash = compute_rules_hash(batch_month)
 
+            batch_status = "SUCCESS"
+
             # Check skip condition
             if args.mode == "skip" and success_path.exists() and trusted_file.exists():
                 try:
@@ -134,55 +136,80 @@ def main():
                         continue
                     else:
                         print(f"[!] Rules hash mismatch for {taxi_type} {batch_month}. Re-processing...")
+                        batch_status = "PROCESSED_RULE_CHANGED"
                 except Exception:
                     print(f"[!] Corrupted _SUCCESS.json for {taxi_type} {batch_month}. Re-processing...")
+                    batch_status = "PROCESSED_RULE_CHANGED"
 
             # Process batch
             t_batch_start = time.time()
             print(f"[+] PROCESSING: {taxi_type} {batch_month}...")
 
-            # Ingestion
-            if args.skip_download:
-                raw_filename = f"{taxi_type}_tripdata_{batch_month}.parquet"
-                raw_path = DATA_DIR / "raw" / raw_filename
-                if not raw_path.exists():
-                    raise FileNotFoundError(f"Raw file not found: {raw_path}")
-            else:
-                raw_path = download_raw_batch(taxi_type, batch_month, force=(args.mode == "force"))
+            try:
+                # Ingestion
+                if args.skip_download:
+                    raw_filename = f"{taxi_type}_tripdata_{batch_month}.parquet"
+                    raw_path = DATA_DIR / "raw" / raw_filename
+                    if not raw_path.exists():
+                        raise FileNotFoundError(f"Raw file not found: {raw_path}")
+                else:
+                    raw_path = download_raw_batch(taxi_type, batch_month, force=(args.mode == "force"))
 
-            # Metadata check
-            meta = inspect_raw_metadata(raw_path)
-            print(f"    Raw size: {meta['size_mb']} MB | Rows: {meta['num_rows']:,}")
+                # Metadata check
+                meta = inspect_raw_metadata(raw_path)
+                print(f"    Raw size: {meta['size_mb']} MB | Rows: {meta['num_rows']:,}")
 
-            # Schema Contract
-            is_valid_schema, missing_cols = validate_schema_contract(raw_path, taxi_type)
-            if not is_valid_schema:
-                raise ValueError(f"Schema Contract Violation for {taxi_type} {batch_month}: missing {missing_cols}")
+                # Schema Contract
+                is_valid_schema, missing_cols = validate_schema_contract(raw_path, taxi_type)
+                if not is_valid_schema:
+                    raise ValueError(f"Schema Contract Violation for {taxi_type} {batch_month}: missing {missing_cols}")
 
-            # Data Quality Audit
-            dq_stat = audit_batch_data_quality(raw_path, taxi_type, batch_month)
-            dq_records.append(dq_stat)
+                # Data Quality Audit
+                dq_stat = audit_batch_data_quality(raw_path, taxi_type, batch_month)
+                dq_records.append(dq_stat)
 
-            # Transform & Atomic Load
-            success_meta = transform_batch(raw_path, taxi_type, batch_month)
-            t_batch_end = time.time()
-            elapsed_batch = round(t_batch_end - t_batch_start, 2)
+                # Transform & Atomic Load
+                success_meta = transform_batch(raw_path, taxi_type, batch_month)
+                t_batch_end = time.time()
+                elapsed_batch = round(t_batch_end - t_batch_start, 2)
 
-            print(f"    -> Done in {elapsed_batch}s. Valid: {success_meta['valid_rows']:,} | Invalid: {success_meta['invalid_rows']:,}")
-            processed_count += 1
+                print(f"    -> Done in {elapsed_batch}s. Valid: {success_meta['valid_rows']:,} | Invalid: {success_meta['invalid_rows']:,}")
+                processed_count += 1
 
-            run_records.append({
-                "run_id": run_id,
-                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "taxi_type": taxi_type,
-                "batch_month": batch_month,
-                "status": "SUCCESS",
-                "raw_rows": success_meta["raw_rows"],
-                "valid_rows": success_meta["valid_rows"],
-                "invalid_rows": success_meta["invalid_rows"],
-                "elapsed_seconds": elapsed_batch,
-                "mode": args.mode
-            })
+                run_records.append({
+                    "run_id": run_id,
+                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "taxi_type": taxi_type,
+                    "batch_month": batch_month,
+                    "status": batch_status,
+                    "raw_rows": success_meta["raw_rows"],
+                    "valid_rows": success_meta["valid_rows"],
+                    "invalid_rows": success_meta["invalid_rows"],
+                    "elapsed_seconds": elapsed_batch,
+                    "mode": args.mode
+                })
+            except Exception as e:
+                t_batch_end = time.time()
+                elapsed_batch = round(t_batch_end - t_batch_start, 2)
+                print(f"[!] BATCH FAILED: {taxi_type} {batch_month} - {e}")
+                run_records.append({
+                    "run_id": run_id,
+                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "taxi_type": taxi_type,
+                    "batch_month": batch_month,
+                    "status": "FAILED",
+                    "raw_rows": 0,
+                    "valid_rows": 0,
+                    "invalid_rows": 0,
+                    "elapsed_seconds": elapsed_batch,
+                    "mode": args.mode
+                })
+                # Persist any accumulated records before re-raising
+                if dq_records:
+                    update_dq_report(dq_records)
+                if run_records:
+                    append_pipeline_run_log(run_records)
+                raise
 
     # Save DQ and run logs
     if dq_records:

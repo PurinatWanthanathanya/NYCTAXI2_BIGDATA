@@ -83,7 +83,11 @@ NYCTAXI2_BIGDATA/
 │   ├── validate.py                     # ตรวจสอบ Schema Contracts และคำนวณ Data Quality Audit
 │   ├── transform.py                    # สตรีม Transform ผ่าน DuckDB และทำ Atomic File Swap
 │   ├── curate.py                       # สรุปผลระดับ Curation (Monthly Summary) และสุ่มตัวอย่าง Stratified Sample
-│   └── analyze.py                      # ตอบคำถามธุรกิจ ตรวจสอบ Regression และทำ Sensitivity Analysis
+│   └── analyze.py                      # ตอบคำถามธุรกิจ ตรวจสอบ Regression และทำ Sensitivity Analysis (ส่วนเสริม A)
+├── scripts/
+│   └── deploy_athena.py                # (ส่วนเสริม B) สคริปต์ Deploy Curated Parquet ขึ้น S3 และเตรียม Athena
+├── sql/
+│   └── athena_setup.sql                # (ส่วนเสริม B) สคริปต์ DDL สำหรับ AWS Athena & Glue Data Catalog
 ├── data/
 │   ├── raw/                            # ข้อมูล Parquet ดิบจาก CloudFront (gitignored)
 │   ├── trusted/                        # ข้อมูล Parquet ที่ Clean และจัด Partition แล้ว (gitignored)
@@ -220,7 +224,9 @@ flowchart TD
 
 ---
 
-## 8. การวิเคราะห์ความอ่อนไหว (Sensitivity Analysis: Outlier ≠ Error)
+## 8. Sensitivity Analysis และ Serving View บน Cloud 
+
+### 8.1 Sensitivity Analysis 
 
 เพื่อทดสอบความหนักแน่นของข้อสรุปธุรกิจ ได้ทำการทดสอบ Sensitivity Analysis กับกฎการกรองข้อมูลทางเลือกเพิ่มเติม ([`outputs/sensitivity_analysis.csv`](outputs/sensitivity_analysis.csv)):
 
@@ -234,6 +240,23 @@ flowchart TD
 *(หมายเหตุ: ในสถานการณ์จำลองที่ 4 เป็นการทดสอบตัดทริปซ้ำบนแถวที่มี Location ครบถ้วน (`pu_location_id IS NOT NULL AND do_location_id IS NOT NULL`) เพื่อป้องกันผลกระทบจากข้อจำกัดของข้อมูล FHV ดั้งเดิมที่มีค่าว่าง Location ถึง 78.33% ซึ่งทำให้ในกรณี FHV มีทริปซ้ำลดลงไปเพียง 1,558 แถว)*
 
 **สรุปผล:** ข้อสรุปที่ว่า **FHVHV เป็นแท็กซี่ที่มีการใช้งานมากที่สุด** มีความหนักแน่นและไม่แปรเปลี่ยนตามทางเลือกการคลีนข้อมูลใดๆ โดยมีทริปนำอันดับสองอยู่มากกว่า **100.5 ล้านทริป** (5.94 เท่าของ Yellow Taxi) ในทุกสถานการณ์จำลอง
+
+### 8.2 Serving Views บน Cloud ผ่าน Amazon Athena & AWS S3 
+
+ต่อยอดจากแนวคิด *Views as a Serving Layer* และ *Reproducibility Ladder* (Module 02) โดยจัดเตรียม DDL Script และเครื่องมือ Deploy ข้อมูลสรุป Curated ขึ้นสู่ระบบคลาวด์:
+- **สคริปต์ DDL สำหรับ Amazon Athena:** [`sql/athena_setup.sql`](sql/athena_setup.sql) ประกอบด้วย:
+  1. `CREATE EXTERNAL TABLE nyc_taxi_curated.curated_monthly_summary`: อ่านไฟล์ Parquet บีบอัด Zstandard จาก S3 โดยตรงแบบ Serverless
+  2. `CREATE VIEW nyc_taxi_curated.v_curated_monthly_summary`: สำหรับคิวรีสถิติรายเดือนครบทุก batch
+  3. `CREATE VIEW nyc_taxi_curated.v_h1_2024_ranking`: Serving View ตอบคำถามหลัก กรองเฉพาะ H1 2024 และคำนวณ Market Share อัตโนมัติ
+- **สคริปต์ตัวช่วย Deploy ([`scripts/deploy_athena.py`](scripts/deploy_athena.py)):**
+  - รองรับการ Sync ไฟล์ `curated_monthly_summary.parquet` ขึ้น S3 Bucket ด้วยคำสั่ง:
+    ```bash
+    python scripts/deploy_athena.py --bucket <your-s3-bucket-name>
+    ```
+  - รองรับโหมด `--dry-run` เพื่อสร้างคำสั่ง SQL ที่ผูกกับชื่อ Bucket อัตโนมัติโดยไม่ต้องใช้ AWS Credentials:
+    ```bash
+    python scripts/deploy_athena.py --bucket <your-s3-bucket-name> --dry-run
+    ```
 
 ---
 
