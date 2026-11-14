@@ -1,0 +1,5 @@
+scenario,fhvhv_trips,yellow_trips,fhv_trips,green_trips,winner,margin_over_runner_up,winner_changed
+1. Baseline (Official Rules),120864668,20331754,8119228,339801,fhvhv,100532914,False
+2. Exclude 0-sec duration,120864656,20325877,8119228,339466,fhvhv,100538779,False
+3. Exclude >24h duration,120864668,20331645,8117007,339801,fhvhv,100533023,False
+4. Exclude duplicate non-null trips,120864373,20105621,8117670,338634,fhvhv,100758752,False

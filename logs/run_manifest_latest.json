@@ -1,0 +1,43 @@
+{
+  "run_id": "7c3f23e2",
+  "pipeline_version": "2.0.0",
+  "mode": "skip",
+  "started_at_utc": "2026-11-14T14:04:16.955957+00:00",
+  "finished_at_utc": "2026-11-14T14:06:51.060669+00:00",
+  "total_wall_time_seconds": 154.1,
+  "batches_processed": 1,
+  "batches_skipped": 6,
+  "h1_regression_check": {
+    "status": "PASSED",
+    "actual_total": 149655451,
+    "expected_total": 149655451,
+    "diff": 0,
+    "type_checks": {
+      "yellow": {
+        "actual": 20331754,
+        "expected": 20331754,
+        "match": true
+      },
+      "green": {
+        "actual": 339801,
+        "expected": 339801,
+        "match": true
+      },
+      "fhv": {
+        "actual": 8119228,
+        "expected": 8119228,
+        "match": true
+      },
+      "fhvhv": {
+        "actual": 120864668,
+        "expected": 120864668,
+        "match": true
+      }
+    }
+  },
+  "final_answer": {
+    "winner": "fhvhv",
+    "winner_trips": 120864668,
+    "winner_market_share_percent": 80.76
+  }
+}

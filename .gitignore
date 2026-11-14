@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.ipynb_checkpoints/
+
+# Temporary and staging files
+*.tmp
+*.parquet.tmp
+
+# Raw & Trusted data (large binaries, downloaded & processed on-demand)
+data/raw/
+data/trusted/
+
+# DuckDB local database files
+data/curated/*.duckdb*
+
+# Internal Planning documents (not for submission)
+SUBMISSION_2_PLAN.md
+
+# OS files
+.DS_Store
+Thumbs.db
