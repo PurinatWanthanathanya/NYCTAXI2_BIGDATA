@@ -31,11 +31,19 @@
 โปรเจกต์นี้พัฒนาและทดสอบรันจริงบน **Python 3.12.10** และล็อกเวอร์ชันของไลบรารีทั้งหมดไว้ใน [`requirements.txt`](requirements.txt) (`duckdb==2.0.0`, `pyarrow==26.0.1`, `pandas==3.1.1`, `matplotlib==3.11.2`)
 
 ### 2.1 การติดตั้ง
+สามารถสร้าง Virtual Environment (`.venv`) เพื่อแยกไลบรารีของโปรเจกต์ก่อนติดตั้งได้ดังนี้ (โฟลเดอร์ `.venv/` ถูกตั้งค่าไว้ใน `.gitignore` เพื่อไม่ให้ commit ขึ้น Git):
 ```bash
 git clone https://github.com/PurinatWanthanathanya/NYCTAXI2_BIGDATA.git
 cd NYCTAXI2_BIGDATA
+
+# สร้างและเปิดใช้งาน Virtual Environment (Windows PowerShell)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# ติดตั้งไลบรารีตามเวอร์ชันที่ล็อกไว้
 python -m pip install -r requirements.txt
 ```
+*(สำหรับ macOS/Linux ใช้ `source .venv/bin/activate`)*
 
 ### 2.2 ทดสอบรันแบบเร็ว (Smoke Test ประมาณ 2 วินาที)
 สามารถทดสอบการทำงานของ Pipeline ตั้งแต่ต้นจนจบด้วยไฟล์เล็กอย่าง `green 2024-01` (~1.3 MiB) ได้ทันทีโดยไม่ต้องรอโหลดข้อมูลใหญ่ทั้งหมด:
@@ -163,6 +171,45 @@ flowchart TD
 ### ชุดข้อมูลพร้อมใช้ (Curated Output & Sample)
 1. **ตารางสรุปรายเดือน:** [`data/curated/curated_monthly_summary.csv`](data/curated/curated_monthly_summary.csv) (และไฟล์ `.parquet`) มีทั้งหมด **25 แถว** (4 ประเภทแท็กซี่ $\times$ 6 เดือน H1 + `yellow 2024-07`) เก็บจำนวนทริป เวลาเดินทางเฉลี่ย และจำนวนค่าว่างของโซนรับ-ส่งไว้ให้พร้อมเอาไปใช้งานต่อได้ทันที
 2. **ไฟล์ตัวอย่างข้อมูลรายทริป:** [`data/sample/curated_trips_sample.csv`](data/sample/curated_trips_sample.csv) (และไฟล์ `.parquet`) สุ่มตัวอย่างแบบแบ่งชั้นจากทั้ง 25 batches ชุดละ 40 แถว รวมทั้งหมด **1,000 แถวพอดี** เพื่อให้เปิดดูหน้าตาข้อมูลที่คลีนแล้วบน GitHub ได้เลยโดยไม่ต้องโหลดไฟล์ใหญ่
+
+#### คำอธิบายคอลัมน์ (Data Dictionary)
+
+**1) ตารางสรุปรายเดือน (`curated_monthly_summary.parquet` — 8 คอลัมน์)**
+| ชื่อคอลัมน์ | ชนิดข้อมูล | คำอธิบาย |
+|:---|:---|:---|
+| `taxi_type` | `VARCHAR` | ประเภทแท็กซี่ (`yellow`, `green`, `fhv`, `fhvhv`) |
+| `batch_month` | `VARCHAR` | เดือนของไฟล์ข้อมูลต้นทางในรูปแบบ `YYYY-MM` |
+| `total_trips` | `BIGINT` | จำนวนทริปที่ผ่านเกณฑ์ความสะอาดในเดือนนั้น |
+| `avg_duration_seconds` | `DOUBLE` | ระยะเวลาเดินทางเฉลี่ย (วินาที) ปัดทศนิยม 1 ตำแหน่ง |
+| `min_pickup_ts` | `TIMESTAMP` | เวลาขึ้นรถที่เร็วที่สุดในกลุ่มข้อมูลสะอาดของ batch นั้น |
+| `max_pickup_ts` | `TIMESTAMP` | เวลาขึ้นรถที่ช้าที่สุดในกลุ่มข้อมูลสะอาดของ batch นั้น |
+| `null_pu_locations` | `BIGINT` | จำนวนทริปที่ `pu_location_id` เป็นค่าว่าง (`NULL`) |
+| `null_do_locations` | `BIGINT` | จำนวนทริปที่ `do_location_id` เป็นค่าว่าง (`NULL`) |
+
+**2) ตารางข้อมูลรายทริป (`data/trusted/` และ `curated_trips_sample.parquet` — 7 คอลัมน์)**
+| ชื่อคอลัมน์ | ชนิดข้อมูล | คำอธิบาย |
+|:---|:---|:---|
+| `pickup_ts` | `TIMESTAMP` | เวลาเริ่มต้นการเดินทาง (เทียบจาก `tpep_*`, `lpep_*`, `pickup_datetime`) |
+| `dropoff_ts` | `TIMESTAMP` | เวลาสิ้นสุดการเดินทาง (เทียบจาก `tpep_*`, `lpep_*`, `dropOff_datetime`, `dropoff_datetime`) |
+| `pu_location_id` | `BIGINT` | รหัสโซนรับผู้โดยสารของ NYC TLC (อนุญาตให้เป็น `NULL` เพื่อรักษาข้อมูล FHV) |
+| `do_location_id` | `BIGINT` | รหัสโซนส่งผู้โดยสารของ NYC TLC (อนุญาตให้เป็น `NULL`) |
+| `trip_duration_seconds` | `BIGINT` | ระยะเวลาเดินทางในหน่วยวินาที (`epoch(dropoff_ts) - epoch(pickup_ts)`) |
+| `taxi_type` | `VARCHAR` | ประเภทแท็กซี่ |
+| `batch_month` | `VARCHAR` | เดือนของไฟล์ต้นทาง (`YYYY-MM`) |
+
+**ตัวอย่างโค้ด Python เปิดอ่านไฟล์ Curated เพื่อคิวรีผลรวม H1 2024 ทันที:**
+```python
+import duckdb
+
+with duckdb.connect() as con:
+    print(con.execute("""
+        SELECT taxi_type, SUM(total_trips) AS valid_trips
+        FROM read_parquet('data/curated/curated_monthly_summary.parquet')
+        WHERE batch_month BETWEEN '2024-01' AND '2024-06'
+        GROUP BY taxi_type
+        ORDER BY valid_trips DESC
+    """).df())
+```
 
 ---
 
