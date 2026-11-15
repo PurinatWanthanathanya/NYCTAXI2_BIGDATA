@@ -28,11 +28,11 @@
 
 ## 2. วิธีติดตั้งและวิธีรัน Pipeline
 
-โปรเจกต์นี้พัฒนาบน **Python 3.10+** และล็อกเวอร์ชันของไลบรารีทั้งหมดไว้ใน [`requirements.txt`](requirements.txt) (`duckdb==2.0.0`, `pyarrow==26.0.1`, `pandas==3.1.1`, `matplotlib==3.11.2`)
+โปรเจกต์นี้พัฒนาและทดสอบรันจริงบน **Python 3.12.10** และล็อกเวอร์ชันของไลบรารีทั้งหมดไว้ใน [`requirements.txt`](requirements.txt) (`duckdb==2.0.0`, `pyarrow==26.0.1`, `pandas==3.1.1`, `matplotlib==3.11.2`)
 
 ### 2.1 การติดตั้ง
 ```bash
-git clone <repo-url>
+git clone https://github.com/PurinatWanthanathanya/NYCTAXI2_BIGDATA.git
 cd NYCTAXI2_BIGDATA
 python -m pip install -r requirements.txt
 ```
@@ -51,6 +51,7 @@ python run_pipeline.py --types green --months 2024-01 --mode skip
 ```
 
 ### 2.4 รันชุดข้อมูลครึ่งปีแรกทั้งหมด (ครบ 24 ไฟล์)
+*(หมายเหตุ: การรันแบบเต็มทั้ง 24 ไฟล์จำเป็นต้องเชื่อมต่ออินเทอร์เน็ตเพื่อดาวน์โหลดไฟล์จาก NYC TLC CloudFront ใช้พื้นที่ดิสก์รวมประมาณ **~4.7 GB** (`data/raw/` 3.24 GB + `data/trusted/` 1.39 GB) และใช้เวลาประมวลผลรวมประมาณ **~19 นาที** หรือ 1,125.15 วินาที)*
 ```bash
 python run_pipeline.py --months 2024-01 2024-02 2024-03 2024-04 2024-05 2024-06 --mode skip
 ```
@@ -87,7 +88,7 @@ NYCTAXI2_BIGDATA/
 │   └── athena_setup.sql                # สคริปต์ SQL สำหรับสร้าง Table และ View บน Amazon Athena
 ├── data/
 │   ├── raw/                            # เก็บไฟล์ Parquet ดิบที่โหลดมา (ไม่ถูก commit ขึ้น Git)
-│   ├── trusted/                        # เก็บไฟล์ Parquet ที่คลีนและจัด Schema แล้ว (ไม่ถูก commit ขึ้น Git)
+│   ├── trusted/                        # เก็บไฟล์ Parquet ที่คลีนและจัด Schema แล้ว (ไม่ถูก commit ขึ้น Git ยกเว้น _SUCCESS.json)
 │   ├── quarantine/                     # เก็บแถวที่ไม่ผ่านเกณฑ์ พร้อมระบุ reject_reason (.parquet, .csv)
 │   ├── curated/                        # ตารางสรุปรายเดือนพร้อมใช้ (curated_monthly_summary.csv / .parquet)
 │   └── sample/                         # ตัวอย่างข้อมูลที่คลีนแล้ว 1,000 แถว (curated_trips_sample.csv / .parquet)
@@ -99,7 +100,11 @@ NYCTAXI2_BIGDATA/
     ├── final_answer_by_taxi_type.csv   # ตารางคำตอบสรุปอันดับการใช้งานแท็กซี่ H1 2024
     ├── sensitivity_analysis.csv        # ผลทดสอบการปรับเปลี่ยนเงื่อนไขการคลีนข้อมูล
     ├── pipeline_data_flow.png          # รูปภาพแผนผังการทำงานของ Pipeline
-    └── taxi_usage_h1_2024.png          # กราฟเปรียบเทียบปริมาณและแนวโน้มรายเดือน H1 2024
+    ├── taxi_usage_h1_2024.png          # กราฟเปรียบเทียบปริมาณและแนวโน้มรายเดือน H1 2024
+    └── aws/                            # รูปผลการนำข้อมูล Curated ไปสร้าง View และคิวรีบน AWS S3 + Athena
+        ├── s3_curated_files.png
+        ├── athena_create_views.png
+        └── athena_h1_ranking_query.png
 ```
 
 ---
@@ -113,14 +118,14 @@ NYCTAXI2_BIGDATA/
 
 ```mermaid
 flowchart TD
-    A["แหล่งข้อมูล NYC TLC CloudFront<br/>(Yellow, Green, FHV, FHVHV)"] -->|Atomic Stream Ingest| B["Raw Zone (data/raw)<br/>อ่าน Footer Metadata โดยไม่โหลดทั้งไฟล์เข้า RAM"]
-    B -->|ตรวจ Schema Contract| C{"Validation Layer<br/>(src/validate.py)"}
-    C -->|ไม่ผ่านเกณฑ์| D["Quarantine Zone (data/quarantine)<br/>แยกตาม Priority พร้อม reject_reason (.parquet, .csv)"]
-    C -->|ผ่านเกณฑ์| E["Trusted Zone (data/trusted)<br/>7 คอลัมน์มาตรฐาน บีบอัด Zstandard Parquet"]
-    E -->|Atomic Rename & Hash| F["_SUCCESS.json<br/>เก็บ rules_hash ไว้เช็คตอนรันซ้ำ"]
-    E -->|Aggregation| G["Curated Zone (data/curated)<br/>curated_monthly_summary.parquet"]
-    G -->|Stratified Sampling| H["Sampling Zone (data/sample)<br/>curated_trips_sample.parquet (1,000 แถว)"]
-    G -->|Analyze & Plot| I["Outputs & Logs (outputs/, logs/)<br/>final_answer.csv, charts, sensitivity.csv"]
+    A["แหล่งข้อมูล NYC TLC CloudFront: Yellow, Green, FHV, FHVHV"] -->|Atomic Stream Ingest| B["Raw Zone data/raw: อ่าน Footer Metadata โดยไม่โหลดทั้งไฟล์เข้า RAM"]
+    B -->|ตรวจ Schema Contract| C{"Validation Layer: src/validate.py"}
+    C -->|ไม่ผ่านเกณฑ์| D["Quarantine Zone data/quarantine: แยกตาม Priority พร้อม reject_reason"]
+    C -->|ผ่านเกณฑ์| E["Trusted Zone data/trusted: 7 คอลัมน์มาตรฐาน บีบอัด Zstandard Parquet"]
+    E -->|Atomic Rename and Hash| F["_SUCCESS.json: เก็บ rules_hash ไว้เช็คตอนรันซ้ำ"]
+    E -->|Aggregation| G["Curated Zone data/curated: curated_monthly_summary.parquet"]
+    G -->|Stratified Sampling| H["Sampling Zone data/sample: curated_trips_sample.parquet 1,000 แถว"]
+    G -->|Analyze and Plot| I["Outputs and Logs: final_answer_by_taxi_type.csv, charts, sensitivity_analysis.csv"]
 ```
 
 </details>
@@ -175,11 +180,11 @@ flowchart TD
 ### 6.2 รายละเอียดของข้อมูลที่ถูกคัดเข้า Quarantine (345 แถว)
 ข้อมูลในครึ่งปีแรกที่ไม่ผ่านเกณฑ์ทั้ง 345 แถว (Yellow 339 แถว, Green 6 แถว) ถูกเก็บไว้ใน `data/quarantine/` โดยมีสาเหตุหลัก 2 อย่าง:
 - **`dropoff_before_pickup` (300 แถว):** เวลาลงรถเกิดก่อนเวลาขึ้นรถ เป็นข้อมูลของ Yellow Taxi ทั้งหมด (เช่น เดือนมีนาคมพบถึง 117 แถว)
-- **`pickup_out_of_period` (45 แถว):** เป็นข้อมูลที่เวลาขึ้นรถหลุดออกจากช่วงครึ่งปีแรกของปี 2024 (Yellow 39 แถว, Green 6 แถว) เมื่อคิวรีดูปีของทริปกลุ่มนี้พบว่ามาจากนาฬิการถเพี้ยนย้อนหลังไปปี **2002** (Yellow 10 แถว), ปี **2008** (Yellow 5, Green 2), ปี **2009** (Yellow 9, Green 2), ปี **2023** (Yellow 10, Green 2) รวมถึงทริปปี **2024** ที่ข้ามไปเดือนกรกฎาคม (Yellow 3 แถว) และปีอนาคต **2026** (Yellow 2 แถว เช่น `2026-06-26 23:53:12`)
+- **`pickup_out_of_period` (45 แถว):** เป็นข้อมูลที่เวลาขึ้นรถหลุดออกจากช่วงครึ่งปีแรกของปี 2024 (Yellow 39 แถว, Green 6 แถว) เมื่อคิวรีดูปีของทริปกลุ่มนี้พบว่าน่าจะเป็นความผิดพลาดของเวลาที่บันทึก โดยพบทริปที่เวลาย้อนหลังไปปี **2002** (Yellow 10 แถว), ปี **2008** (Yellow 5, Green 2), ปี **2009** (Yellow 9, Green 2), ปี **2023** (Yellow 10, Green 2) รวมถึงทริปปี **2024** ที่ข้ามไปเดือนกรกฎาคม (Yellow 3 แถว) และปีอนาคต **2026** (Yellow 2 แถว เช่น `2026-06-26 23:53:12`)
 - **`null_pickup` / `null_dropoff` (0 แถว):** ไม่พบแถวที่เวลาขึ้น-ลงรถเป็นค่าว่างในข้อมูลชุดนี้
 
 ### 6.3 ข้อสังเกตเรื่องค่าว่างของ Location ID ในกลุ่ม FHV
-จากการเช็คคุณภาพข้อมูลใน [`logs/dq_report_by_batch.csv`](logs/dq_report_by_batch.csv) พบว่าคอลัมน์ `PUlocationID` ของรถกลุ่ม **FHV** เป็นค่าว่าง (`NULL`) อยู่ถึง **6,359,783 แถว จาก 8,119,228 แถว (คิดเป็น 78.33%** หรือประมาณ `963,825` ถึง `1,191,229` แถวต่อเดือน) เนื่องจากรถกลุ่มนี้เป็นรถเช่า/อู่รถแบบดั้งเดิมที่ไม่ได้บันทึกพิกัดรับผู้โดยสารไว้ครบเหมือนระบบแอปฯ จึงตั้งใจปล่อยให้ `pu_location_id` และ `do_location_id` เก็บค่าว่างได้ (Nullable) แทนที่จะลบทิ้ง เพื่อไม่ให้ข้อมูลของ FHV หายไปเกือบ 80%
+จากการเช็คคุณภาพข้อมูลใน [`logs/dq_report_by_batch.csv`](logs/dq_report_by_batch.csv) พบว่าคอลัมน์ `PUlocationID` ของรถกลุ่ม **FHV** เป็นค่าว่าง (`NULL`) อยู่ถึง **6,359,783 แถว จาก 8,119,228 แถว (คิดเป็น 78.33%** หรือประมาณ `963,825` ถึง `1,191,229` แถวต่อเดือน) โดยไม่ทราบสาเหตุแน่ชัด ทราบเพียงว่ามีค่าว่างอยู่ 78.33% จึงตั้งใจปล่อยให้ `pu_location_id` และ `do_location_id` เก็บค่าว่างได้ (Nullable) แทนที่จะลบทิ้ง เพื่อไม่ให้ข้อมูลของ FHV หายไปเกือบ 80%
 
 ### 6.4 ผลทดสอบเงื่อนไขการคลีนเพิ่มเติม (Sensitivity Analysis)
 เพื่อทดสอบว่าถ้าเปลี่ยนวิธีคลีนข้อมูลเพิ่มเติมจากกฎหลัก ผลอันดับผู้ชนะจะเปลี่ยนไปหรือไม่ จึงได้ลองรันทดสอบเพิ่มอีก 3 กรณีไว้ใน [`outputs/sensitivity_analysis.csv`](outputs/sensitivity_analysis.csv):
@@ -191,18 +196,32 @@ flowchart TD
 | 3. ตัดทริปที่นานเกิน 24 ชั่วโมงออก | 120,864,668 | 20,331,645 | **FHVHV** | +100,533,023 | **ไม่เปลี่ยน** |
 | 4. ตัดทริปที่ซ้ำกัน (เช็คเฉพาะแถวที่ Location ไม่ว่าง) | 120,864,373 | 20,105,621 | **FHVHV** | +100,758,752 | **ไม่เปลี่ยน** |
 
-*(หมายเหตุ: ในกรณีที่ 4 กำหนดเงื่อนไขเช็คซ้ำเฉพาะแถวที่ `pu_location_id IS NOT NULL AND do_location_id IS NOT NULL` เพื่อกันไม่ให้ข้อมูล FHV ที่มีค่าว่าง Location อยู่ 78.33% ถูกเหมาว่าซ้ำกันเกินจริง ทำให้ FHV ลดลงไปเพียง 1,558 แถว และในทุกกรณี FHVHV ยังนำ Yellow อยู่มากกว่า 100.5 ล้านทริปเหมือนเดิม)*
+*(หมายเหตุ: ในกรณีที่ 4 กำหนดเงื่อนไขเช็คซ้ำเฉพาะแถวที่ `pu_location_id IS NOT NULL AND do_location_id IS NOT NULL` เพื่อกันไม่ให้ข้อมูล FHV ที่มีค่าว่าง Location อยู่ 78.33% ถูกเหมาว่าซ้ำกันเกินจริง ทำให้ FHV ลดลงไปเพียง 1,558 แถว ขณะที่ Yellow Taxi ลดลงไป **226,133 แถว** จาก `20,331,754` เหลือ `20,105,621` เนื่องจากชั้น `data/trusted/` เก็บเฉพาะ 7 คอลัมน์มาตรฐาน การเช็คแถวซ้ำด้วย `(pickup_ts, dropoff_ts, pu_location_id, do_location_id)` จึงแยกไม่ได้ระหว่างข้อมูลซ้ำจริงกับทริปคนละคันที่บังเอิญขึ้นและลงในวินาทีและโซนเดียวกัน อย่างไรก็ตามในทุกกรณี FHVHV ยังนำ Yellow อยู่มากกว่า 100.5 ล้านทริปเหมือนเดิม)*
 
-### 6.5 การเตรียมสคริปต์ต่อยอดขึ้น Cloud (AWS S3 + Amazon Athena)
-นอกจากนี้ยังได้เตรียมสคริปต์ต่อยอดตามแนวคิด *Views as a Serving Layer* ที่เรียนในคลาสไว้ให้ด้วย เพื่อให้สามารถนำไฟล์สรุปจาก `data/curated/` ขึ้นไปคิวรีบน Cloud ได้ทันทีผ่าน [`sql/athena_setup.sql`](sql/athena_setup.sql) (สร้าง External Table และ View `v_curated_monthly_summary`, `v_h1_2024_ranking` บน Amazon Athena) คู่กับสคริปต์ช่วยอัปโหลด [`scripts/deploy_athena.py`](scripts/deploy_athena.py) (รองรับโหมด `--dry-run` สำหรับสร้างไฟล์ SQL ตามชื่อ Bucket ของตัวเอง)
+### 6.5 การนำชุดข้อมูล Curated ไปสร้าง Serving View บน AWS S3 + Amazon Athena
+นอกจากนี้ยังได้เตรียมสคริปต์ต่อยอดตามแนวคิด *Views as a Serving Layer* ที่เรียนในคลาสไว้ใน [`sql/athena_setup.sql`](sql/athena_setup.sql) (สร้าง External Table และ View `v_curated_monthly_summary`, `v_h1_2024_ranking` บน Amazon Athena) คู่กับสคริปต์ช่วยอัปโหลด [`scripts/deploy_athena.py`](scripts/deploy_athena.py) (เรียกใช้งานคำสั่ง `aws` CLI ภายนอก และรองรับโหมด `--dry-run` เพื่อสร้างไฟล์ SQL โดยไม่ต้องใช้ AWS Credentials)
+
+*(หมายเหตุ: ขั้นตอนการอัปโหลดและรัน SQL นี้เป็นการ deploy ด้วยมือบน AWS Learner Lab **ไม่ได้รวมอยู่ในขั้นตอนอัตโนมัติของ `run_pipeline.py`**)*
+
+1. **รายการไฟล์ Curated บน Amazon S3:**
+
+   ![S3 Curated Files](outputs/aws/s3_curated_files.png)
+
+2. **การสร้าง External Table และ View (`v_curated_monthly_summary`, `v_h1_2024_ranking`) สำเร็จใน Amazon Athena:**
+
+   ![Athena Create Views](outputs/aws/athena_create_views.png)
+
+3. **ผลคิวรี `SELECT * FROM nyc_taxi_curated.v_h1_2024_ranking ORDER BY rank;` ที่ได้ `fhvhv` อันดับ 1 จำนวน `120,864,668` ทริป (`80.76%`) ตรงกับผลรันบนเครื่อง:**
+
+   ![Athena H1 Ranking Query](outputs/aws/athena_h1_ranking_query.png)
 
 ---
 
 ## 7. การตัดสินใจสำคัญในการออกแบบ Pipeline
 
 ### 1. แยกเดือนของไฟล์ (`batch_month`) ออกจากเวลาขึ้นรถจริง (`pickup_ts`)
-- **สาเหตุ:** ในไฟล์ Parquet รายเดือนของ NYC TLC มักมีทริปช่วงข้ามรอยต่อเดือนหลงติดมาด้วย (เช่น ทริปคืนสิ้นเดือนที่หลุดไปอยู่ในไฟล์เดือนถัดไป) ซึ่งใน Submission 1 นับยอดยึดตามไฟล์ H1 ทั้ง 24 ไฟล์เป็นหลัก ถ้าเอาเวลา `pickup_ts` มาแบ่งเดือน ทริปที่คาบเกี่ยวจะย้ายข้ามเดือนจนยอดรวมเพี้ยนไปจาก Baseline
-- **วิธีแก้:** เลยเก็บ `batch_month` ตามชื่อไฟล์ที่โหลดมาเพื่อใช้แบ่งโฟลเดอร์และกรองช่วง H1 2024 ส่วน `pickup_ts` เก็บไว้ดูเวลาเดินทางจริง ทำให้เพิ่มข้อมูลเดือน `2024-07` เข้ามาได้โดยที่ยอด H1 ไม่เพี้ยน
+- **สาเหตุ:** ในงาน Submission 1 นับยอดรวมแยกตามไฟล์ต้นทางทั้ง 24 ไฟล์เป็นหลัก และเมื่อเพิ่มไฟล์เดือนใหม่ (เช่น `yellow 2024-07`) เข้ามาในระบบ จะต้องไม่ทำให้ยอดรวมของไฟล์เดือนเก่าเปลี่ยนไป นอกจากนี้เมื่อคิวรีตรวจใน `data/trusted/` ช่วง H1 2024 ด้วยเงื่อนไข `strftime(pickup_ts, '%Y-%m') != batch_month` พบว่ามีทริปที่ผ่านเกณฑ์ความสะอาดแต่เดือนของ `pickup_ts` ไม่ตรงกับชื่อเดือนของไฟล์อยู่จริง **148 แถว** (แบ่งเป็น Yellow **110 แถว** และ Green **38 แถว** เช่น ไฟล์ `yellow 2024-06` มีทริปเดือน `2024-05` ติดมา 42 แถว และไฟล์ `yellow 2024-03` มีทริปเดือน `2024-02` ติดมา 19 แถว) รวมถึงมีทริปในไฟล์ `yellow 2024-06` ที่เวลาข้ามไปเดือนกรกฎาคมอีก 3 แถวใน Quarantine ดังนั้นถ้าเอา `pickup_ts` มาแบ่งเดือน ยอดรายเดือนจะขยับจาก Baseline
+- **วิธีแก้:** เลยเก็บ `batch_month` ตามชื่อไฟล์ที่โหลดมาเพื่อใช้แบ่งโฟลเดอร์และกรองช่วง H1 2024 ทำให้ยอดรวมแต่ละประเภทตรงกับ Submission 1 ทุกแถว (`Diff = 0`) และป้องกันไม่ให้ไฟล์เดือน `2024-07` เข้ามาปนกับผลลัพธ์ H1 ส่วน `pickup_ts` ยังคงเก็บไว้ดูเวลาเดินทางจริง
 
 ### 2. เขียนลงไฟล์ชั่วคราว `.tmp` ก่อนเปลี่ยนชื่อจริง และเช็คกฎด้วย `rules_hash`
 - **สาเหตุ:** ถ้าโปรแกรมพังหรือไฟดับระหว่างเขียน Parquet ไฟล์จะเสียค้างอยู่ในระบบ และถ้าวันหลังเราเข้าไปแก้กฎทำความสะอาดแล้วรัน `--mode skip` โค้ดแบบเดิมที่เช็คแค่ว่ามีไฟล์อยู่แล้วจะข้ามผิดพลาดและเอาผลเก่ามาใช้
@@ -235,9 +254,12 @@ flowchart TD
 1. **รันบนเครื่องเดียว (Single-Node):** ถึงแม้ DuckDB จะช่วยจัดการข้อมูล 150 ล้านแถวบนโน้ตบุ๊กให้จบได้ใน ~18 นาที แต่ถ้าข้อมูลโตระดับหลายสิบปีหรือหลาย Terabytes ก็จะติดคอขวดที่ดิสก์และต้องย้ายไปใช้ระบบกระจายงานหลายเครื่องอย่าง Spark แทน
 2. **รองรับเฉพาะไฟล์รายเดือน (Batch Processing):** Pipeline นี้ออกแบบมารับไฟล์ Parquet ที่ปล่อยเป็นรายเดือน ยังไม่ได้รองรับการรับข้อมูลแบบ Real-time Streaming
 3. **พึ่งพาโครงสร้างไฟล์ต้นทาง:** การโหลดข้อมูลอิงตาม URL และชื่อคอลัมน์ใน `SCHEMA_MAP` จาก NYC TLC CloudFront ถ้าต้นทางมีการเปลี่ยนโครงสร้างไฟล์หรือชื่อคอลัมน์ในอนาคตก็ต้องมาแก้ที่ `config.py` เพิ่มเติม
+4. **ตัวชี้วัดนับเฉพาะจำนวนรายการทริป (Trip Records):** การเปรียบเทียบนี้วัดจากจำนวนแถวการเดินทางที่บันทึกไว้เท่านั้น ไม่ได้วัดจำนวนผู้โดยสารจริงหรือระยะทางรวม ผลลัพธ์ที่ได้จึงตอบคำถามภายใต้กรอบนิยามจำนวนทริปเท่านั้น
+5. **การตัดแถวซ้ำใน Sensitivity Analysis กรณีที่ 4 แยกทริปที่เวลาและโซนบังเอิญชนกันไม่ได้:** เนื่องจากชั้น `data/trusted/` เก็บเฉพาะ 7 คอลัมน์มาตรฐาน การเช็คแถวซ้ำจากเวลาขึ้น-ลงรถและโซนรับ-ส่งจึงแยกไม่ได้ระหว่างข้อมูลซ้ำจริงกับทริปคนละคันที่บังเอิญขึ้นและลงในวินาทีและโซนเดียวกัน (เห็นได้จาก Yellow Taxi ที่ลดลงไปถึง `226,133` แถวในกรณีที่ 4)
+6. **ส่วนของ AWS Athena ไม่ได้อยู่ในขั้นตอนอัตโนมัติของ Pipeline:** การอัปโหลดไฟล์ขึ้น S3 และการสร้างตาราง/View บน Amazon Athena เป็นการสั่งรันแยกต่างหากด้วยมือบน AWS Learner Lab ไม่ได้ถูกรวมอยู่ในขั้นตอนการทำงานอัตโนมัติของ `run_pipeline.py`
 
 ---
 
 ## 9. สิ่งที่เรียนรู้จากการทำโปรเจกต์ (Learning Reflection)
 
-ตอนทำ Submission 1 โค้ดทุกอย่างอยู่ใน Notebook เดียวที่รันผ่านในหน่วยความจำรอบเดียวแล้วจบ พอมาทำ Submission 2 เลยเปลี่ยนมาแยกโค้ดเป็นไฟล์ย่อยตามหน้าที่และเซฟข้อมูลที่คลีนแล้วลงดิสก์ใน `data/trusted/` ซึ่งช่วยลดขนาดไฟล์ครึ่งปีแรกจาก 3,191.23 MB เหลือ 1,357.44 MB การเพิ่ม `_SUCCESS.json` คู่กับ `rules_hash` ช่วยให้ระบบข้ามไฟล์ที่ทำเสร็จแล้วและรันใหม่เฉพาะตอนกฎเปลี่ยนหรือมีเดือนใหม่เข้ามา จะได้ไม่ต้องเสียเวลารันข้อมูล 149.65 ล้านแถวซ้ำทุกครั้ง สุดท้ายการแยกข้อมูลที่ผิดพลาดทั้ง 345 แถวออกมาเก็บในโซน Quarantine ทำให้เราตามเช็คสาเหตุย้อนหลังได้ทุกแถวโดยที่คำตอบหลักยังตรงกับ Submission 1 ทั้งหมดครับ
+งานนี้ทำให้รู้ว่าการทำ Pipeline ต่างจากการรันโค้ดใน Notebook รอบเดียวมาก อย่างแรกคือต้องดูข้อมูลจริงก่อนตั้งกฎ เพราะ FHV ไม่มีรหัสโซนถึง 78.33% ถ้าตัดทิ้งมั่วๆ ข้อมูลจะหายเกือบหมด อย่างที่สองคือต้องแยกเดือนของไฟล์ (`batch_month`) ออกจากเวลาขึ้นรถจริง เวลาเติมเดือนใหม่เข้ามาตัวเลขเก่าจะได้ไม่เพี้ยน และพอเซฟไฟล์ที่คลีนแล้วลงดิสก์คู่กับ `_SUCCESS.json` ก็ไม่ต้องเสียเวลารัน 149.65 ล้านแถวซ้ำใหม่ทุกครั้ง

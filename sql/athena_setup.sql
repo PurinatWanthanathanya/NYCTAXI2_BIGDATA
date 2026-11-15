@@ -3,7 +3,7 @@
 -- Serving View บน Cloud (AWS S3 + Glue Catalog + Amazon Athena)
 -- ==============================================================================
 -- สคริปต์นี้สร้าง Database, External Table, และ Serving Views บน Amazon Athena
--- สำหรับเชื่อมต่อกับไฟล์ Curated Parquet บน S3 (อิงตามแนวคิด Views as a Serving Layer - Module 02)
+-- สำหรับเชื่อมต่อกับไฟล์ Curated Parquet บน S3 (ตามแนวคิด Views as a Serving Layer)
 --
 -- ขั้นตอนการใช้งาน:
 -- 1. อัปโหลด data/curated/curated_monthly_summary.parquet ขึ้น S3 Bucket
@@ -34,7 +34,7 @@ TBLPROPERTIES (
     'has_encrypted_data' = 'false'
 );
 
--- 3. สร้าง Serving View: สรุปภาพรวมรายเดือนทุกประเภทแท็กซี่ (Module 02: Serving View)
+-- 3. สร้าง Serving View: สรุปภาพรวมรายเดือนทุกประเภทแท็กซี่
 CREATE OR REPLACE VIEW nyc_taxi_curated.v_curated_monthly_summary AS
 SELECT
     taxi_type,
