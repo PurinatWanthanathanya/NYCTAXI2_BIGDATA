@@ -93,7 +93,8 @@ NYCTAXI2_BIGDATA/
 │   ├── curate.py                       # สร้างตารางสรุปรายเดือนและสุ่มชุดข้อมูลตัวอย่างแบบแบ่งชั้น
 │   └── analyze.py                      # คำนวณคำตอบหลัก เช็ค Regression ทดสอบ Sensitivity และวาดรูปผลสรุป
 ├── scripts/
-│   └── deploy_athena.py                # สคริปต์ช่วยอัปโหลดไฟล์ Curated ขึ้น AWS S3 และเตรียมไฟล์ SQL
+│   ├── deploy_athena.py                # สคริปต์ช่วยอัปโหลดไฟล์ Curated ขึ้น AWS S3 และเตรียมไฟล์ SQL
+│   └── verify_readme_evidence.py       # สคริปต์รันคิวรีตรวจยืนยันตัวเลขและหลักฐานทุกหัวข้อใน README
 ├── sql/
 │   └── athena_setup.sql                # สคริปต์ SQL สำหรับสร้าง Table และ View บน Amazon Athena
 ├── data/
@@ -111,6 +112,8 @@ NYCTAXI2_BIGDATA/
     ├── sensitivity_analysis.csv        # ผลทดสอบการปรับเปลี่ยนเงื่อนไขการคลีนข้อมูล
     ├── pipeline_data_flow.png          # รูปภาพแผนผังการทำงานของ Pipeline
     ├── taxi_usage_h1_2024.png          # กราฟเปรียบเทียบปริมาณและแนวโน้มรายเดือน H1 2024
+    ├── terminal_idempotent_run.jpg     # ภาพถ่ายหน้าจอการรัน H1 ทั้ง 24 ไฟล์ในโหมด --mode skip และผล Regression Check
+    ├── terminal_verify_evidence.jpg    # ภาพถ่ายหน้าจอผลรัน scripts/verify_readme_evidence.py ตรวจตัวเลขจากไฟล์จริง
     └── aws/                            # รูปผลการนำข้อมูล Curated ไปสร้าง View และคิวรีบน AWS S3 + Athena
         ├── s3_curated_files.png
         ├── athena_create_views.png
@@ -128,14 +131,15 @@ NYCTAXI2_BIGDATA/
 
 ```mermaid
 flowchart TD
-    A["แหล่งข้อมูล NYC TLC CloudFront: Yellow, Green, FHV, FHVHV"] -->|Atomic Stream Ingest| B["Raw Zone data/raw: อ่าน Footer Metadata โดยไม่โหลดทั้งไฟล์เข้า RAM"]
-    B -->|ตรวจ Schema Contract| C{"Validation Layer: src/validate.py"}
-    C -->|ไม่ผ่านเกณฑ์| D["Quarantine Zone data/quarantine: แยกตาม Priority พร้อม reject_reason"]
-    C -->|ผ่านเกณฑ์| E["Trusted Zone data/trusted: 7 คอลัมน์มาตรฐาน บีบอัด Zstandard Parquet"]
-    E -->|Atomic Rename and Hash| F["_SUCCESS.json: เก็บ rules_hash ไว้เช็คตอนรันซ้ำ"]
-    E -->|Aggregation| G["Curated Zone data/curated: curated_monthly_summary.parquet"]
-    G -->|Stratified Sampling| H["Sampling Zone data/sample: curated_trips_sample.parquet 1,000 แถว"]
-    G -->|Analyze and Plot| I["Outputs and Logs: final_answer_by_taxi_type.csv, charts, sensitivity_analysis.csv"]
+    A["แหล่งข้อมูล NYC TLC CloudFront: Yellow, Green, FHV, FHVHV"] --> B{"ด่านที่ 1: เช็ค Idempotency<br/>_SUCCESS.json + rules_hash"}
+    B -->|"SKIP (hash ตรง & --mode skip)"| H["ขั้นที่ 4: Curate (src/curate.py)<br/>curated_monthly_summary & sample 1,000 แถว"]
+    B -->|"RUN (ไฟล์ใหม่ / force / กฎเปลี่ยน)"| C["ขั้นที่ 1: Ingest (src/ingest.py)<br/>โหลด .tmp -> os.replace -> data/raw/ + อ่าน Footer"]
+    C --> D{"ขั้นที่ 2: ด่านตรวจ Schema & DQ<br/>src/validate.py (ก่อน Transform)"}
+    D -->|"FAIL (คอลัมน์หาย / ไฟล์เสีย)"| E["FAIL-FAST Error Log<br/>หยุด Batch & บันทึก status = FAILED ลง pipeline_run_log.csv"]
+    D -->|"PASS (Schema ครบ 4 คอลัมน์)"| F["ขั้นที่ 3: Transform (src/transform.py)<br/>DuckDB กรองกฎเวลา 4 ข้อ & ตรวจ raw == valid + invalid"]
+    F -->|"PASS กฎเวลา 4 ข้อ (149,655,451 แถว)"| G["Trusted Zone: data/trusted/<br/>7 คอลัมน์ ZSTD Parquet + _SUCCESS.json"]
+    F -->|"FAIL กฎเวลา (345 แถว H1)"| Q["Quarantine Zone: data/quarantine/<br/>rejected.parquet / .csv พร้อม reject_reason"]
+    G --> H --> I["ขั้นที่ 5: Analyze & Serve (src/analyze.py)<br/>final_answer_by_taxi_type.csv, Sensitivity, Regression Check, Graphs"]
 ```
 
 </details>
@@ -169,6 +173,11 @@ flowchart TD
   - ระบบข้าม 6 เดือนแรกของ Yellow (`2024-01` ถึง `2024-06`) และประมวลผลเพิ่มเฉพาะ `yellow 2024-07` เพียงไฟล์เดียว (Raw `3,076,903` แถว, Valid `3,076,851` แถว, Quarantine `52` แถว ใช้เวลาเฉพาะ batch `18.06 วินาที` และเวลารวมทั้งรอบ `154.1 วินาที` รวมขั้น curate/analyze ตาม [`logs/run_manifest_latest.json`](logs/run_manifest_latest.json))
   - ยอดรวมของ H1 2024 ยังคงเป็น `149,655,451` ทริปเท่าเดิม (`PASSED`)
   - *(หมายเหตุ: เดือน `2024-07` ในรอบนี้ใช้เพื่อทดสอบการอัปเดตข้อมูลรายเดือนเฉพาะของ Yellow Taxi เท่านั้น ไม่ได้นำมาเปรียบเทียบจัดอันดับข้ามประเภทของเดือนกรกฎาคม)*
+
+### ภาพถ่ายหน้าจอการรันแบบ Idempotent (`--mode skip`)
+ภาพด้านล่างเป็นผลรันจริงใน Terminal ด้วยคำสั่ง `python run_pipeline.py --months 2024-01 2024-02 2024-03 2024-04 2024-05 2024-06 --mode skip --skip-sensitivity` ซึ่งแสดงให้เห็นว่าระบบตรวจพบ `_SUCCESS.json` และค่า `rules_hash` ที่ตรงกัน จึงข้ามทั้ง 24 batches (`Batches Skipped: 24`) แล้วสรุปผลและผ่าน `H1 REGRESSION CHECK PASSED: Total Valid = 149,655,451 (Diff = 0)` ภายใน **5.0 วินาที** *(หลังบันทึกภาพหน้าจอนี้ได้ใช้ `git restore` คืนไฟล์ `logs/` และ `data/sample/` ให้คงประวัติ 3 รอบหลักด้านบนไว้ตามเดิม)*
+
+![Terminal Idempotent Run](outputs/terminal_idempotent_run.jpg)
 
 ### ชุดข้อมูลพร้อมใช้ (Curated Output & Sample)
 1. **ตารางสรุปรายเดือน:** [`data/curated/curated_monthly_summary.csv`](data/curated/curated_monthly_summary.csv) (และไฟล์ `.parquet`) มีทั้งหมด **25 แถว** (4 ประเภทแท็กซี่ $\times$ 6 เดือน H1 + `yellow 2024-07`) เก็บจำนวนทริป เวลาเดินทางเฉลี่ย และจำนวนค่าว่างของโซนรับ-ส่งไว้ให้พร้อมเอาไปใช้งานต่อได้ทันที
@@ -220,11 +229,11 @@ with duckdb.connect() as con:
 ### 6.1 ตารางเทียบยอดข้อมูลกับ Submission 1
 | ประเภทแท็กซี่ | แถวดิบ (Raw) | Submission 1 Valid | Pipeline Valid | Quarantine | ผลต่าง (Diff) | สถานะ |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Yellow** | 20,332,093 | 20,331,754 | **20,331,754** | 339 | 0 | **ตรงกัน 100%** |
-| **Green** | 339,807 | 339,801 | **339,801** | 6 | 0 | **ตรงกัน 100%** |
-| **FHV** | 8,119,228 | 8,119,228 | **8,119,228** | 0 | 0 | **ตรงกัน 100%** |
-| **FHVHV** | 120,864,668 | 120,864,668 | **120,864,668** | 0 | 0 | **ตรงกัน 100%** |
-| **รวมทั้งหมด** | **149,655,796** | **149,655,451** | **149,655,451** | **345** | **0** | **ตรงกันทุกแถว** |
+| **Yellow** | 20,332,093 | 20,331,754 | **20,331,754** | 339 | 0 | ตรงกัน |
+| **Green** | 339,807 | 339,801 | **339,801** | 6 | 0 | ตรงกัน |
+| **FHV** | 8,119,228 | 8,119,228 | **8,119,228** | 0 | 0 | ตรงกัน |
+| **FHVHV** | 120,864,668 | 120,864,668 | **120,864,668** | 0 | 0 | ตรงกัน |
+| **รวมทั้งหมด** | **149,655,796** | **149,655,451** | **149,655,451** | **345** | **0** | **ตรงกัน** |
 
 ### 6.2 รายละเอียดของข้อมูลที่ถูกคัดเข้า Quarantine (345 แถว)
 ข้อมูลในครึ่งปีแรกที่ไม่ผ่านเกณฑ์ทั้ง 345 แถว (Yellow 339 แถว, Green 6 แถว) ถูกเก็บไว้ใน `data/quarantine/` โดยมีสาเหตุหลัก 2 อย่าง:
@@ -236,18 +245,77 @@ with duckdb.connect() as con:
 จากการเช็คคุณภาพข้อมูลใน [`logs/dq_report_by_batch.csv`](logs/dq_report_by_batch.csv) พบว่าคอลัมน์ `PUlocationID` ของรถกลุ่ม **FHV** เป็นค่าว่าง (`NULL`) อยู่ถึง **6,359,783 แถว จาก 8,119,228 แถว (คิดเป็น 78.33%** หรือประมาณ `963,825` ถึง `1,191,229` แถวต่อเดือน) โดยไม่ทราบสาเหตุแน่ชัด ทราบเพียงว่ามีค่าว่างอยู่ 78.33% จึงตั้งใจปล่อยให้ `pu_location_id` และ `do_location_id` เก็บค่าว่างได้ (Nullable) แทนที่จะลบทิ้ง เพื่อไม่ให้ข้อมูลของ FHV หายไปเกือบ 80%
 
 ### 6.4 ผลทดสอบเงื่อนไขการคลีนเพิ่มเติม (Sensitivity Analysis)
-เพื่อทดสอบว่าถ้าเปลี่ยนวิธีคลีนข้อมูลเพิ่มเติมจากกฎหลัก ผลอันดับผู้ชนะจะเปลี่ยนไปหรือไม่ จึงได้ลองรันทดสอบเพิ่มอีก 3 กรณีไว้ใน [`outputs/sensitivity_analysis.csv`](outputs/sensitivity_analysis.csv):
+เพื่อทดสอบว่าถ้าเปลี่ยนวิธีคลีนข้อมูลเพิ่มเติมจากกฎหลัก ผลอันดับผู้ชนะจะเปลี่ยนไปหรือไม่ จึงได้ลองรันทดสอบเพิ่มอีก 3 กรณีไว้ใน [`outputs/sensitivity_analysis.csv`](outputs/sensitivity_analysis.csv) พร้อมนับจำนวนแถวที่ถูกตัดเพิ่มในแต่ละกฎ (เทียบจากยอดกฎหลัก `149,655,451` แถว):
 
-| เงื่อนไขที่ลองปรับเพิ่ม | ทริป FHVHV | ทริป Yellow | ผู้ชนะ | ระยะห่างอันดับ 2 | ผู้ชนะเปลี่ยนไหม? |
-|:---|:---:|:---:|:---:|:---:|:---:|
-| **1. กฎหลัก (Baseline)** | **120,864,668** | 20,331,754 | **FHVHV** | **+100,532,914** | **ไม่เปลี่ยน** |
-| 2. ตัดทริปที่ระยะเวลาเป็น 0 วินาทีออก | 120,864,656 | 20,325,877 | **FHVHV** | +100,538,779 | **ไม่เปลี่ยน** |
-| 3. ตัดทริปที่นานเกิน 24 ชั่วโมงออก | 120,864,668 | 20,331,645 | **FHVHV** | +100,533,023 | **ไม่เปลี่ยน** |
-| 4. ตัดทริปที่ซ้ำกัน (เช็คเฉพาะแถวที่ Location ไม่ว่าง) | 120,864,373 | 20,105,621 | **FHVHV** | +100,758,752 | **ไม่เปลี่ยน** |
+| เงื่อนไขที่ลองปรับเพิ่ม | ทริป FHVHV | ทริป Yellow | ทริป FHV | ทริป Green | รวมคงเหลือ (H1) | ตัดออกเพิ่ม (แถว) | ผู้ชนะ & ระยะห่างอันดับ 2 |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **1. กฎหลัก (Baseline)** | **120,864,668** | 20,331,754 | 8,119,228 | 339,801 | **149,655,451** | 0 | **FHVHV** (+100,532,914) |
+| 2. ตัดทริปที่ระยะเวลาเป็น 0 วินาทีออก | 120,864,656 `(-12)` | 20,325,877 `(-5,877)` | 8,119,228 `(0)` | 339,466 `(-335)` | 149,649,227 | **6,224** | **FHVHV** (+100,538,779) |
+| 3. ตัดทริปที่นานเกิน 24 ชั่วโมงออก | 120,864,668 `(0)` | 20,331,645 `(-109)` | 8,117,007 `(-2,221)` | 339,801 `(0)` | 149,653,121 | **2,330** | **FHVHV** (+100,533,023) |
+| 4. ตัดทริปที่ซ้ำกัน (เช็คเฉพาะแถวที่ Location ไม่ว่าง) | 120,864,373 `(-295)` | 20,105,621 `(-226,133)` | 8,117,670 `(-1,558)` | 338,634 `(-1,167)` | 149,426,298 | **229,153** | **FHVHV** (+100,758,752) |
 
-*(หมายเหตุ: ในกรณีที่ 4 กำหนดเงื่อนไขเช็คซ้ำเฉพาะแถวที่ `pu_location_id IS NOT NULL AND do_location_id IS NOT NULL` เพื่อกันไม่ให้ข้อมูล FHV ที่มีค่าว่าง Location อยู่ 78.33% ถูกเหมาว่าซ้ำกันเกินจริง ทำให้ FHV ลดลงไปเพียง 1,558 แถว ขณะที่ Yellow Taxi ลดลงไป **226,133 แถว** จาก `20,331,754` เหลือ `20,105,621` เนื่องจากชั้น `data/trusted/` เก็บเฉพาะ 7 คอลัมน์มาตรฐาน การเช็คแถวซ้ำด้วย `(pickup_ts, dropoff_ts, pu_location_id, do_location_id)` จึงแยกไม่ได้ระหว่างข้อมูลซ้ำจริงกับทริปคนละคันที่บังเอิญขึ้นและลงในวินาทีและโซนเดียวกัน อย่างไรก็ตามในทุกกรณี FHVHV ยังนำ Yellow อยู่มากกว่า 100.5 ล้านทริปเหมือนเดิม)*
+สรุปจำนวนแถวที่ถูกตัดออกในแต่ละเงื่อนไขเพิ่มเติม (อันดับผู้ชนะ **ไม่เปลี่ยน** ในทุกกรณี):
+- **กรณีที่ 2 (ตัดระยะเวลา = 0 วินาที):** ตัดออกรวม **`6,224` แถว** (เหลือ `149,649,227` แถว) — แยกเป็น Yellow `5,877` แถว, Green `335` แถว, FHVHV `12` แถว และ FHV `0` แถว
+- **กรณีที่ 3 (ตัดระยะเวลา > 24 ชั่วโมง):** ตัดออกรวม **`2,330` แถว** (เหลือ `149,653,121` แถว) — แยกเป็น FHV `2,221` แถว, Yellow `109` แถว ส่วน FHVHV และ Green ไม่พบทริปเกิน 24 ชั่วโมง
+- **กรณีที่ 4 (ตัดแถวซ้ำเมื่อ Location ไม่ว่าง):** ตัดออกรวม **`229,153` แถว** (เหลือ `149,426,298` แถว) — แยกเป็น Yellow **`226,133` แถว**, FHV `1,558` แถว, Green `1,167` แถว และ FHVHV `295` แถว *(กำหนดเงื่อนไข `pu_location_id IS NOT NULL AND do_location_id IS NOT NULL` เพื่อกันไม่ให้ข้อมูล FHV ที่มีค่าว่าง Location อยู่ 78.33% ถูกเหมาว่าซ้ำกันเกินจริง ส่วน Yellow ที่ลดลง `226,133` แถวเกิดจากชั้น `data/trusted/` เก็บเฉพาะ 7 คอลัมน์มาตรฐาน จึงแยกไม่ได้ระหว่างข้อมูลซ้ำจริงกับทริปคนละคันที่บังเอิญขึ้นและลงในวินาทีและโซนเดียวกัน อย่างไรก็ตามในทุกกรณี FHVHV ยังนำ Yellow อยู่มากกว่า 100.5 ล้านทริปเหมือนเดิม)*
 
-### 6.5 การนำชุดข้อมูล Curated ไปสร้าง Serving View บน AWS S3 + Amazon Athena
+### 6.5 สคริปต์ตรวจสอบหลักฐานตัวเลขทั้งหมดในเอกสาร (`scripts/verify_readme_evidence.py`)
+ผู้ตรวจสามารถรันสคริปต์ [`scripts/verify_readme_evidence.py`](scripts/verify_readme_evidence.py) เพื่อคิวรีตรวจสอบตัวเลขทุกจุดใน README จากไฟล์จริง (`logs/`, `data/quarantine/`, `outputs/sensitivity_analysis.csv` และไฟล์ `data/raw/`, `data/trusted/` หากอยู่ในเครื่องที่รัน Pipeline แล้ว) ด้วยคำสั่ง:
+```bash
+python scripts/verify_readme_evidence.py
+```
+*(หมายเหตุ: หากรันบนเครื่องที่เพิ่ง `git clone` ใหม่โดยยังไม่ได้โหลดชุดข้อมูลเต็ม ระบบจะตรวจส่วน `[2]`–`[4]` จากไฟล์ที่ commit ไว้ใน Repo ได้ทันที และจะแสดง `[SKIP]` เฉพาะส่วน `[1]` และ `[5]` เนื่องจากไฟล์ `data/raw/` และ `data/trusted/*.parquet` ถูกกันไว้ใน `.gitignore`)*
+
+![Terminal Verify Evidence](outputs/terminal_verify_evidence.jpg)
+
+<details>
+<summary>คลิกเพื่อดูผลลัพธ์จริงจากการรันสคริปต์ตรวจสอบตัวเลขทุกหัวข้อ (verify_readme_evidence.py)</summary>
+
+```text
+========================================================================
+README EVIDENCE VERIFICATION REPORT (Live Query on Repo Files)
+========================================================================
+[1] Section 4: File Sizes & Compression Savings (Raw -> Trusted)
+  H1 2024 (24 files): Raw = 3,191.23 MiB -> Trusted = 1,357.44 MiB (Saved 57.46%)
+  Incl. 2024-07 (25 files): Raw = 3,241.10 MiB -> Trusted = 1,388.11 MiB (Saved 57.17%)
+
+[2] Section 5: Run History & Latest Manifest (logs/)
+  Run 1 (H1 Full FORCE) [ae02785e]: batches=24, statuses={'SUCCESS': 24}, raw=149,655,796, valid=149,655,451, invalid=345, batch_elapsed_sum=841.18s
+  Run 2 (Idempotent SKIP) [6fe1ebe9]: batches=24, statuses={'SKIPPED_ALREADY_PROCESSED': 24}, raw=149,655,796, valid=149,655,451, invalid=345, batch_elapsed_sum=0.00s
+  Run 3 (Incremental yellow 2024-07) [7c3f23e2]: batches=7, statuses={'SKIPPED_ALREADY_PROCESSED': 6, 'SUCCESS': 1}, raw=23,408,996, valid=23,408,605, invalid=391, batch_elapsed_sum=18.06s
+    -> New batch processed: yellow 2024-07 (raw=3,076,903, valid=3,076,851, invalid=52, elapsed=18.06s)
+  Latest Manifest (7c3f23e2): wall_time=154.1s, h1_check=PASSED (total=149,655,451, diff=0), winner=FHVHV (120,864,668 / 80.76%)
+
+[3] Section 6.1-6.3: H1 Reconciliation, Quarantine (345 rows) & FHV Nulls
+  6.1 H1 2024 Reconciliation by Taxi Type (from dq_report_by_batch.csv):
+    yellow: raw= 20,332,093 | valid= 20,331,754 | invalid=339
+    green : raw=    339,807 | valid=    339,801 | invalid=  6
+    fhv   : raw=  8,119,228 | valid=  8,119,228 | invalid=  0
+    fhvhv : raw=120,864,668 | valid=120,864,668 | invalid=  0
+    TOTAL : raw=149,655,796 | valid=149,655,451 | invalid=345
+  6.2 Quarantine H1 breakdown by reject_reason (9 files): [('dropoff_before_pickup', 300), ('pickup_out_of_period', 45)]
+    yellow 2024-03 dropoff_before_pickup = 117
+    pickup_out_of_period periods: 2002(total=10: Y=10, G=0), 2008(total=7: Y=5, G=2), 2009(total=11: Y=9, G=2), 2023(total=12: Y=10, G=2), 2024-07(total=3: Y=3, G=0), 2026(total=2: Y=2, G=0)
+  6.3 FHV Null PUlocationID: 6,359,783 / 8,119,228 (78.33%), monthly range = 963,825 to 1,191,229
+
+[4] Section 6.4: Sensitivity Analysis (outputs/sensitivity_analysis.csv)
+  1. Baseline (Official Rules): FHVHV=120,864,668 | Yellow=20,331,754 | FHV=8,119,228 | Green=339,801 | Winner=FHVHV (+100,532,914, changed=False)
+  2. Exclude 0-sec duration: FHVHV=120,864,656 | Yellow=20,325,877 | FHV=8,119,228 | Green=339,466 | Winner=FHVHV (+100,538,779, changed=False)
+  3. Exclude >24h duration: FHVHV=120,864,668 | Yellow=20,331,645 | FHV=8,117,007 | Green=339,801 | Winner=FHVHV (+100,533,023, changed=False)
+  4. Exclude duplicate non-null trips: FHVHV=120,864,373 | Yellow=20,105,621 | FHV=8,117,670 | Green=338,634 | Winner=FHVHV (+100,758,752, changed=False)
+
+[5] Section 7.1: batch_month vs pickup_ts Mismatch in H1 Trusted Parquet
+  Total H1 mismatch rows: 148 -> by taxi_type: [('yellow', 110), ('green', 38)]
+  Top examples (type, batch_month, pickup_month, cnt): [('yellow', '2024-06', '2024-05', 42), ('yellow', '2024-03', '2024-02', 19), ('yellow', '2024-05', '2024-04', 13), ('yellow', '2024-05', '2024-06', 13), ('green', '2024-06', '2024-05', 13)]
+
+========================================================================
+VERIFICATION COMPLETED SUCCESSFULLY
+========================================================================
+```
+
+</details>
+
+### 6.6 การนำชุดข้อมูล Curated ไปสร้าง Serving View บน AWS S3 + Amazon Athena
 นอกจากนี้ยังได้เตรียมสคริปต์ต่อยอดตามแนวคิด *Views as a Serving Layer* ที่เรียนในคลาสไว้ใน [`sql/athena_setup.sql`](sql/athena_setup.sql) (สร้าง External Table และ View `v_curated_monthly_summary`, `v_h1_2024_ranking` บน Amazon Athena) คู่กับสคริปต์ช่วยอัปโหลด [`scripts/deploy_athena.py`](scripts/deploy_athena.py) (เรียกใช้งานคำสั่ง `aws` CLI ภายนอก และรองรับโหมด `--dry-run` เพื่อสร้างไฟล์ SQL โดยไม่ต้องใช้ AWS Credentials)
 
 *(หมายเหตุ: ขั้นตอนการอัปโหลดและรัน SQL นี้เป็นการ deploy ด้วยมือบน AWS Learner Lab **ไม่ได้รวมอยู่ในขั้นตอนอัตโนมัติของ `run_pipeline.py`**)*

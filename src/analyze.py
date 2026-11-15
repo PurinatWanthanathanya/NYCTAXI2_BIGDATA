@@ -282,8 +282,10 @@ def generate_visualizations() -> Path:
 
 def generate_pipeline_diagram() -> Path:
     """
-    Generate a clean Data Flow Diagram image (outputs/pipeline_data_flow.png)
-    illustrating all 5 pipeline stages, storage zones, and output files.
+    Generate a detailed Data Flow Diagram image (outputs/pipeline_data_flow.png)
+    illustrating idempotency skip checks, ingest, pre-transform schema validation
+    PASS/FAIL gates, transform reconciliation (trusted vs quarantine), curation,
+    and analysis/serving.
     """
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     output_png = OUTPUTS_DIR / "pipeline_data_flow.png"
@@ -291,138 +293,213 @@ def generate_pipeline_diagram() -> Path:
     plt.rcParams["font.sans-serif"] = ["Leelawadee UI", "Tahoma", "Sarabun", "sans-serif"]
     plt.rcParams["axes.unicode_minus"] = False
 
-    fig, ax = plt.subplots(figsize=(15, 11.2), dpi=300)
+    fig, ax = plt.subplots(figsize=(16, 13.5), dpi=300)
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 100)
     ax.axis("off")
 
-    def draw_box(x, y, w, h, title, body, fc, ec, title_color="#0f172a", body_color="#334155"):
+    def draw_box(
+        x, y, w, h, title, body, fc, ec,
+        title_color="#0f172a", body_color="#334155",
+        title_fs=10.6, body_fs=8.6, linestyle="-"
+    ):
         box = patches.FancyBboxPatch(
             (x, y), w, h,
-            boxstyle="round,pad=0.35,rounding_size=1.2",
-            facecolor=fc, edgecolor=ec, linewidth=1.8
+            boxstyle="round,pad=0.3,rounding_size=1.0",
+            facecolor=fc, edgecolor=ec, linewidth=1.7, linestyle=linestyle
         )
         ax.add_patch(box)
         ax.text(
-            x + w / 2, y + h - 2.3, title,
-            ha="center", va="top", fontsize=11.5, fontweight="bold", color=title_color
+            x + w / 2, y + h - 1.25, title,
+            ha="center", va="top", fontsize=title_fs, fontweight="bold", color=title_color
         )
         ax.text(
-            x + w / 2, y + h - 5.3, body,
-            ha="center", va="top", fontsize=9.5, color=body_color, linespacing=1.45
+            x + w / 2, y + h - 3.65, body,
+            ha="center", va="top", fontsize=body_fs, color=body_color, linespacing=1.38
         )
 
-    def draw_arrow(x1, y1, x2, y2, label=None, label_offset=(0, 0), color="#475569"):
+    def draw_arrow(
+        x1, y1, x2, y2, label=None, label_pos=None,
+        color="#475569", linestyle="-", label_fs=8.2
+    ):
         ax.annotate(
             "", xy=(x2, y2), xytext=(x1, y1),
-            arrowprops=dict(arrowstyle="-|>,head_width=0.6,head_length=0.8", color=color, lw=1.8)
+            arrowprops=dict(
+                arrowstyle="-|>,head_width=0.55,head_length=0.75",
+                color=color, lw=1.7, linestyle=linestyle
+            )
         )
         if label:
-            mx = (x1 + x2) / 2 + label_offset[0]
-            my = (y1 + y2) / 2 + label_offset[1]
+            lx, ly = label_pos if label_pos is not None else ((x1 + x2) / 2, (y1 + y2) / 2)
             ax.text(
-                mx, my, label, ha="center", va="center", fontsize=8.8, fontweight="bold",
-                color=color, bbox=dict(boxstyle="round,pad=0.25", facecolor="#ffffff", edgecolor="none", alpha=0.9)
+                lx, ly, label, ha="center", va="center", fontsize=label_fs, fontweight="bold",
+                color=color, bbox=dict(boxstyle="round,pad=0.22", facecolor="#ffffff", edgecolor="#e2e8f0", lw=0.7, alpha=0.96)
             )
+
+    def draw_polyline_arrow(points, label=None, label_pos=None, color="#475569", linestyle="--", label_fs=8.0):
+        xs = [p[0] for p in points[:-1]]
+        ys = [p[1] for p in points[:-1]]
+        ax.plot(xs, ys, color=color, lw=1.7, linestyle=linestyle, solid_capstyle="round")
+        draw_arrow(
+            points[-2][0], points[-2][1], points[-1][0], points[-1][1],
+            label=label, label_pos=label_pos, color=color, linestyle=linestyle, label_fs=label_fs
+        )
 
     # Header
     ax.text(
-        50, 96.5,
+        50, 97.4,
         "ผังการทำงานและการไหลของข้อมูล (NYC Taxi Reproducible Data Pipeline)",
-        ha="center", va="center", fontsize=15.5, fontweight="bold", color="#0f172a"
+        ha="center", va="center", fontsize=15.0, fontweight="bold", color="#0f172a"
     )
     ax.text(
-        50, 93.2,
-        "ประมวลผลข้อมูล 4 ประเภทแท็กซี่ (ม.ค.–มิ.ย. 2024 + ก.ค. 2024) ด้วย DuckDB Out-of-Core และ Atomic Writes",
-        ha="center", va="center", fontsize=10.5, color="#475569"
+        50, 94.7,
+        "แสดงด่านตรวจสอบ Idempotency, ด่านตรวจ Schema ก่อน Transform, เส้นทาง PASS / FAIL และโซนข้อมูลทั้งหมด",
+        ha="center", va="center", fontsize=10.0, color="#475569"
     )
 
-    # Step 1: Source
+    # Row 1: Source & Gate 1 (Idempotency)
     draw_box(
-        18, 80.5, 64, 9.2,
-        "ขั้นที่ 1: แหล่งข้อมูลต้นทาง (NYC TLC CloudFront)",
-        "ไฟล์ Parquet 4 ประเภท (yellow, green, fhv, fhvhv) ช่วงเดือน 2024-01 ถึง 2024-06 (+ 2024-07 สำหรับทดสอบอัปเดต)",
-        fc="#f8fafc", ec="#64748b"
+        3.0, 83.0, 32.0, 9.2,
+        "แหล่งข้อมูล (NYC TLC CloudFront)",
+        "• ไฟล์ Parquet 4 ประเภท (yellow, green, fhv, fhvhv)\n• ช่วง H1: 2024-01 ถึง 2024-06 (24 ไฟล์)\n• + ทดสอบอัปเดตเดือนใหม่: yellow 2024-07",
+        fc="#f8fafc", ec="#64748b", title_color="#0f172a"
+    )
+    draw_arrow(35.4, 87.6, 40.6, 87.6, label="ตรวจราย Batch", label_pos=(38.0, 89.2), color="#475569", label_fs=7.6)
+
+    draw_box(
+        41.0, 83.0, 56.0, 9.2,
+        "ด่านที่ 1: เช็ค Idempotency (run_pipeline.py & config.py)",
+        "ตรวจ _SUCCESS.json + data.parquet + ค่า rules_hash (SHA-256 ของ Schema & กฎเวลา)\n• SKIP (--mode skip & hash ตรง): ข้าม Batch ตรงไปขั้น Curate (< 0.05s/ไฟล์)\n• RUN (ไฟล์ใหม่ / --mode force / rules_hash เปลี่ยน): ส่งเข้าขั้นที่ 1 Ingest",
+        fc="#eef2ff", ec="#4f46e5", title_color="#312e81"
     )
 
-    draw_arrow(50, 80.1, 50, 76.2)
+    # Arrow from Gate 1 -> Step 1 (RUN)
+    draw_arrow(
+        49.0, 82.6, 49.0, 78.6,
+        label="RUN: ไฟล์ใหม่ / force / กฎเปลี่ยน",
+        label_pos=(49.0, 80.6), color="#1d4ed8", label_fs=8.0
+    )
 
-    # Step 2: Ingest
+    # Row 2: Step 1 (Ingest -> data/raw)
     draw_box(
-        14, 64.5, 72, 11.2,
-        "ขั้นที่ 2: ดึงข้อมูลและตรวจสอบไฟล์ดิบ (src/ingest.py  ->  data/raw/)",
-        "สตรีมดาวน์โหลดลงไฟล์ .tmp แล้วเปลี่ยนชื่อแบบ Atomic (os.replace) ป้องกันไฟล์เสียค้างกลางคัน\nอ่านจำนวนแถวและรายชื่อคอลัมน์จาก Parquet Footer ด้วย PyArrow โดยไม่โหลดข้อมูลเข้า RAM",
+        3.0, 69.0, 58.0, 9.2,
+        "ขั้นที่ 1: ดึงไฟล์ดิบลง Raw Zone (src/ingest.py  ->  data/raw/)",
+        "• สตรีมดาวน์โหลดลง .parquet.tmp แล้วสลับชื่อด้วย os.replace() กันไฟล์ขาดกลางคัน\n• ใช้ PyArrow อ่านเฉพาะ Parquet Footer เอา num_rows & columns โดยไม่โหลดทั้งไฟล์เข้า RAM\n• เก็บไฟล์ดิบครบ 24 ไฟล์ H1 (3,191.23 MiB) โดยห้ามแก้ไขทับข้อมูลต้นฉบับ",
         fc="#eff6ff", ec="#3b82f6", title_color="#1e3a8a"
     )
 
+    # Arrow from Step 1 -> Step 2 (Validate)
     draw_arrow(
-        50, 64.1, 50, 59.3,
-        label="เช็ค Idempotency (run_pipeline.py): _SUCCESS.json + rules_hash ตรงกันให้ข้ามทันที",
-        label_offset=(0, 0), color="#1d4ed8"
+        32.0, 68.6, 32.0, 63.4,
+        label="ส่งไฟล์ดิบไปตรวจโครงสร้างก่อน Transform",
+        label_pos=(32.0, 66.0), color="#b45309", label_fs=8.0
     )
 
-    # Step 3: Validate & Transform
+    # Row 3: Step 2 (Validation Gate) & FAIL branch
     draw_box(
-        14, 47.0, 72, 11.8,
-        "ขั้นที่ 3: ตรวจสอบ Schema และคัดกรองข้อมูล (src/validate.py & src/transform.py)",
-        "เช็คคอลัมน์บังคับเทียบ config.SCHEMA_MAP (Fail-Fast) + ตรวจกฎเวลา 4 ข้อด้วย DuckDB Streaming\nตรวจสอบสมการสมดุล raw_rows == valid_rows + invalid_rows ก่อนสลับชื่อไฟล์และสร้าง _SUCCESS.json",
+        3.0, 53.0, 58.0, 10.0,
+        "ขั้นที่ 2: ด่านตรวจ Schema & นับ DQ ก่อน Transform (src/validate.py)",
+        "1) ตรวจ Schema Contract: ต้องมีคอลัมน์ครบ 4 ตัวตาม config.SCHEMA_MAP\n   (จัดการชื่อที่ต่างกัน เช่น tpep_*, lpep_*, dropOff_datetime, PUlocationID)\n2) คิวรีนับสถิติ DQ (overlap_* vs prio_*) + ค่าว่าง PUlocationID บันทึก dq_report_by_batch.csv",
         fc="#fefce8", ec="#eab308", title_color="#713f12"
     )
 
-    # Branching arrows from Step 3
-    draw_arrow(34, 46.6, 25.0, 42.1, label="ผ่านเกณฑ์เวลา 4 ข้อ", label_offset=(-2.5, 0.3), color="#15803d")
-    draw_arrow(66, 46.6, 75.0, 42.1, label="ไม่ผ่านเกณฑ์ (แยกตาม Priority)", label_offset=(2.5, 0.3), color="#b91c1c")
+    draw_arrow(
+        61.4, 58.0, 65.6, 58.0,
+        label="FAIL", label_pos=(63.5, 59.6), color="#dc2626", label_fs=8.2
+    )
 
-    # Box 3A: Trusted Zone
     draw_box(
-        3, 27.5, 43.5, 14.0,
-        "โซนข้อมูลสะอาด: data/trusted/ (7 คอลัมน์มาตรฐาน)",
-        "• จัดเก็บแยกตาม taxi_type และ batch_month (ZSTD Parquet)\n• คงค่า pu/do_location_id เป็น Nullable เพื่อรักษาทริปของ FHV\n• เก็บ _SUCCESS.json คู่กับไฟล์ + ลดขนาด H1 เหลือ 1,357.44 MiB (-57.46%)",
+        66.0, 53.0, 25.5, 10.0,
+        "FAIL: หยุดแบบ Fail-Fast",
+        "• คอลัมน์หายหรือไฟล์เสีย\n• หยุด Batch ทันทีก่อน Transform\n• บันทึก status = FAILED\n  ลง logs/pipeline_run_log.csv",
+        fc="#fff1f2", ec="#e11d48", title_color="#881337"
+    )
+
+    # Arrow Step 2 -> Step 3 (PASS Schema)
+    draw_arrow(
+        32.0, 52.6, 32.0, 48.0,
+        label="PASS: Schema ครบถ้วน",
+        label_pos=(32.0, 50.3), color="#15803d", label_fs=8.2
+    )
+
+    # Row 4: Step 3 (Transform & Reconciliation)
+    draw_box(
+        3.0, 38.0, 58.0, 9.6,
+        "ขั้นที่ 3: คัดกรองแถวและตรวจสมการสมดุล (src/transform.py)",
+        "• ใช้ DuckDB Streaming กรองกฎเวลา 4 ข้อ: null_pickup, null_dropoff, dropoff < pickup, นอกช่วงเวลา\n• แปลงชื่อเป็น 7 คอลัมน์มาตรฐาน แล้วเขียนแยก .tmp พร้อมตรวจ assert raw == valid + invalid\n• เมื่อตัวเลขสมดุลตรงกันจึงทำ os.replace() เพื่อเปลี่ยนชื่อไฟล์จริงและออกใบรับรอง",
+        fc="#fff7ed", ec="#f97316", title_color="#7c2d12"
+    )
+
+    # Branch arrows from Transform -> Trusted (PASS) and Quarantine (FAIL)
+    draw_arrow(
+        24.0, 37.6, 24.0, 33.4,
+        label="PASS กฎเวลา 4 ข้อ (149,655,451 แถว)",
+        label_pos=(24.0, 35.5), color="#15803d", label_fs=8.0
+    )
+    draw_arrow(
+        52.0, 37.6, 68.0, 33.4,
+        label="FAIL กฎเวลา (345 แถว H1)",
+        label_pos=(60.0, 35.5), color="#dc2626", label_fs=8.0
+    )
+
+    # Row 5: Box 3A (Trusted) & Box 3B (Quarantine)
+    draw_box(
+        3.0, 22.5, 45.0, 10.5,
+        "PASS -> โซนข้อมูลสะอาด: data/trusted/",
+        "• เก็บ 7 คอลัมน์มาตรฐาน บีบอัด ZSTD แยกตาม taxi_type & batch_month\n• อนุญาตให้ pu/do_location_id เป็น NULL (รักษาข้อมูล FHV 78.33%)\n• ลดขนาด H1 เหลือ 1,357.44 MiB (-57.46% จากไฟล์ดิบ)\n• สร้างไฟล์ _SUCCESS.json เก็บ rules_hash ไว้เป็นขั้นตอนสุดท้าย",
         fc="#f0fdf4", ec="#22c55e", title_color="#14532d"
     )
 
-    # Box 3B: Quarantine Zone
     draw_box(
-        53.5, 27.5, 43.5, 14.0,
-        "โซนข้อมูลมีปัญหา: data/quarantine/",
-        "• เก็บแถวที่ตกเกณฑ์ลง rejected.parquet / .csv (H1 รวม 345 แถว)\n• ระบุ reject_reason ค่าเดียวตามลำดับสำคัญ (เช่น dropoff_before_pickup)\n• นับสถิติละเมิดกฎรายข้อแบบซ้อนทับเก็บไว้ใน logs/dq_report_by_batch.csv",
+        51.5, 22.5, 40.0, 10.5,
+        "FAIL -> โซนข้อมูลมีปัญหา: data/quarantine/",
+        "• แยกเก็บใน rejected.parquet และ rejected.csv (เปิดตรวจได้)\n• ระบุ reject_reason ค่าเดียวตามลำดับความสำคัญ:\n  dropoff_before_pickup (300 แถว) | pickup_out_of_period (45 แถว)\n• ไม่ให้ข้อมูลเสียหลุดเข้าข้อมูลสะอาดและใช้ตรวจสอบย้อนหลังได้",
         fc="#fef2f2", ec="#ef4444", title_color="#7f1d1d"
     )
 
-    draw_arrow(24.75, 27.1, 24.75, 22.8, color="#0369a1")
-    draw_arrow(75.25, 27.1, 75.25, 22.8, label="สถิติ DQ & Log", color="#475569")
+    # Trusted -> Curate arrow & Gate 1 SKIP Express Lane -> Curate
+    draw_arrow(
+        23.0, 22.1, 23.0, 17.9,
+        label="อ่านไฟล์สะอาดทุกพาร์ทิชัน",
+        label_pos=(23.0, 20.0), color="#0369a1", label_fs=8.0
+    )
 
-    # Box 4: Curate
+    draw_polyline_arrow(
+        [(95.2, 82.6), (95.2, 19.9), (38.0, 19.9), (38.0, 17.9)],
+        label="SKIP (hash ตรง)\nข้ามไปขั้น Curate",
+        label_pos=(93.8, 44.5), color="#4f46e5", linestyle="--", label_fs=7.8
+    )
+
+    # Row 6: Curate & Analyze
     draw_box(
-        3, 8.0, 43.5, 14.2,
+        3.0, 6.5, 45.0, 11.0,
         "ขั้นที่ 4: สร้างชุดข้อมูลพร้อมใช้ (src/curate.py)",
-        "• data/curated/curated_monthly_summary.parquet / .csv\n  (ตารางสรุปรายเดือน 25 แถว ครอบคลุม 4 ประเภท + ก.ค. ของ Yellow)\n• data/sample/curated_trips_sample.parquet / .csv\n  (ตัวอย่างข้อมูลพร้อมใช้ 1,000 แถว — สุ่มแบ่งชั้น batch ละ 40 แถว)",
+        "• อ่าน data/trusted/ ทั้งหมด (รวม 2024-07 หากมี) ใช้ RAM <= 205 MiB\n• data/curated/curated_monthly_summary.parquet / .csv (25 แถว)\n• data/sample/curated_trips_sample.parquet / .csv\n  (สุ่มแบ่งชั้นพาร์ทิชันละ 40 แถว x 25 = 1,000 แถวพอดี)",
         fc="#f0f9ff", ec="#0284c7", title_color="#0c4a6e"
     )
 
-    draw_arrow(47.0, 15.1, 53.0, 15.1, color="#6d28d9")
+    draw_arrow(48.4, 12.0, 51.1, 12.0, label="ส่งต่อ", label_pos=(49.75, 13.8), color="#6d28d9", label_fs=7.6)
 
-    # Box 5: Analyze
     draw_box(
-        53.5, 8.0, 43.5, 14.2,
-        "ขั้นที่ 5: วิเคราะห์คำตอบและบันทึกหลักฐาน (src/analyze.py)",
-        "• กรองเฉพาะ batch_month ช่วง H1 (2024-01..2024-06) ตอบคำถามหลัก\n• outputs/final_answer_by_taxi_type.csv (ผู้ชนะ: FHVHV 120.86M / 80.76%)\n• เช็ค H1 Regression ตรงกับ S1 (149,655,451 แถว, Diff = 0)\n• สร้างกราฟผลสรุป, ตาราง Sensitivity และบันทึกประวัติใน logs/",
+        51.5, 6.5, 45.5, 11.0,
+        "ขั้นที่ 5: วิเคราะห์คำตอบ & ตรวจ Regression (src/analyze.py)",
+        "• กรองเฉพาะ H1 (2024-01..06) -> final_answer_by_taxi_type.csv\n  (ผู้ชนะ: FHVHV 120,864,668 ทริป / 80.76%)\n• ตรวจ H1 Regression เทียบ S1 (PASSED: 149,655,451, Diff = 0)\n• รัน Sensitivity 4 กรณี, วาดกราฟ และบันทึก logs/run_manifest_latest.json",
         fc="#faf5ff", ec="#9333ea", title_color="#4c1d95"
     )
 
-    # Footer: Cloud Serving Script
+    # Footer
     footer_box = patches.FancyBboxPatch(
-        (3, 1.5), 94, 4.3,
+        (3.0, 1.0), 94.0, 3.6,
         boxstyle="round,pad=0.25,rounding_size=0.8",
         facecolor="#f1f5f9", edgecolor="#94a3b8", linewidth=1.2, linestyle="--"
     )
     ax.add_patch(footer_box)
     ax.text(
-        50, 3.65,
-        "การต่อยอดขึ้น Cloud (AWS S3 + Amazon Athena): ใช้ scripts/deploy_athena.py และ sql/athena_setup.sql สำหรับนำไฟล์ data/curated/ ขึ้นสร้าง Serving View บน Cloud",
-        ha="center", va="center", fontsize=9.2, color="#334155", fontweight="bold"
+        50.0, 2.8,
+        "การต่อยอด Serving Layer บน Cloud (AWS S3 + Amazon Athena): รัน scripts/deploy_athena.py และ sql/athena_setup.sql เพื่อสร้าง External Table และ View บน Cloud",
+        ha="center", va="center", fontsize=9.0, color="#334155", fontweight="bold"
     )
 
     plt.tight_layout()
