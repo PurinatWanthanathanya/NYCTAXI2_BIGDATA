@@ -379,7 +379,7 @@ def generate_pipeline_diagram() -> Path:
     draw_box(
         3, 27.5, 43.5, 14.0,
         "โซนข้อมูลสะอาด: data/trusted/ (7 คอลัมน์มาตรฐาน)",
-        "• จัดเก็บแยกตาม taxi_type และ batch_month (ZSTD Parquet)\n• คงค่า pu/do_location_id เป็น Nullable เพื่อรักษาทริปของ FHV\n• เก็บ _SUCCESS.json คู่กับไฟล์ + ลดขนาด H1 เหลือ 1,357.44 MB (-57.46%)",
+        "• จัดเก็บแยกตาม taxi_type และ batch_month (ZSTD Parquet)\n• คงค่า pu/do_location_id เป็น Nullable เพื่อรักษาทริปของ FHV\n• เก็บ _SUCCESS.json คู่กับไฟล์ + ลดขนาด H1 เหลือ 1,357.44 MiB (-57.46%)",
         fc="#f0fdf4", ec="#22c55e", title_color="#14532d"
     )
 
